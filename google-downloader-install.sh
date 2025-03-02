@@ -37,14 +37,14 @@ configure_backup_dir() {
         echo -e "${RED}Error: Cannot create directory $BACKUP_DIR${NC}"
         echo "Please check permissions and try again"
         exit 1
-    }
+    fi
     
     # Test write permissions
     if ! touch "$BACKUP_DIR/.test_write" 2>/dev/null; then
         echo -e "${RED}Error: Cannot write to $BACKUP_DIR${NC}"
         echo "Please check permissions and try again"
         exit 1
-    }
+    fi
     rm -f "$BACKUP_DIR/.test_write"
     
     echo -e "${GREEN}Backup directory $BACKUP_DIR is ready${NC}"
