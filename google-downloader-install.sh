@@ -50,6 +50,35 @@ configure_backup_dir() {
     echo -e "${GREEN}Backup directory $BACKUP_DIR is ready${NC}"
 }
 
+configure_google_auth() {
+    CONFIG_DIR="$HOME/.config/gphotos-sync"
+    mkdir -p "$CONFIG_DIR"
+    
+    echo "Google Photos authentication setup:"
+    echo "1. You need a client_secret.json file from Google Cloud Console"
+    echo "2. Please enter the path to your downloaded client_secret.json file"
+    
+    while true; do
+        read -p "Enter path to client_secret.json: " secret_path
+        secret_path=$(eval echo "$secret_path")  # Expand path
+        
+        if [ -f "$secret_path" ]; then
+            cp "$secret_path" "$CONFIG_DIR/client_secret.json"
+            echo -e "${GREEN}Authentication file configured successfully${NC}"
+            break
+        else
+            echo -e "${RED}Error: File not found${NC}"
+            echo "Please make sure you've downloaded the client_secret.json file from Google Cloud Console"
+            echo "Would you like to try again? (y/n)"
+            read retry
+            if [ "$retry" != "y" ]; then
+                echo "Exiting installation"
+                exit 1
+            fi
+        fi
+    done
+}
+
 install_gphotos_sync() {
     echo "Installing gphotos-sync..."
     
@@ -69,8 +98,11 @@ install_gphotos_sync() {
     pip install gphotos-sync
     
     echo -e "${GREEN}Installation complete!${NC}"
-    echo "Now we'll set up Google Photos authentication..."
     
+    # Configure Google authentication
+    configure_google_auth
+    
+    echo "Now we'll set up Google Photos authentication..."
     # Run initial auth
     gphotos-sync "$BACKUP_DIR"
     
