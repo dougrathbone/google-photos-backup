@@ -53,6 +53,11 @@ configure_backup_dir() {
 install_gphotos_sync() {
     echo "Installing gphotos-sync..."
     
+    # Install script to local bin
+    mkdir -p "$HOME/.local/bin"
+    cp "$0" "$HOME/.local/bin/google-photos-backup"
+    chmod +x "$HOME/.local/bin/google-photos-backup"
+    
     # Configure backup directory first
     configure_backup_dir
     
@@ -103,8 +108,9 @@ uninstall() {
     # Remove from crontab
     crontab -l | grep -v "$INSTALL_DIR/sync-photos.sh" | crontab -
     
-    # Remove installation
+    # Remove installation and script
     rm -rf "$INSTALL_DIR"
+    rm -f "$HOME/.local/bin/google-photos-backup"
     
     echo -e "${GREEN}Uninstallation complete!${NC}"
     echo "Note: Backup directory ($BACKUP_DIR) was not removed to preserve your photos."
