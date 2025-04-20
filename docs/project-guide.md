@@ -68,6 +68,7 @@ This document outlines the requirements for a new Linux application, `gphotos-sy
 * **Performance:** Should be mindful of Google Photos API rate limits and query efficiently. Downloads should not consume excessive system resources.
 * **Security:** API credentials (OAuth tokens) must be stored securely (e.g., with restricted file permissions, potentially outside the main config file). Avoid logging sensitive information.
 * **Maintainability:** Code should be well-structured, commented where necessary, and follow Node.js best practices.
+* **Testability:** All core logic (configuration, authentication, state management, API interaction, synchronization) should be unit tested using Jest. New features or significant refactors must include corresponding unit tests. All tests must pass before moving to the next development step.
 
 **6. Technology Stack**
 

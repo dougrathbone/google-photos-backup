@@ -4,6 +4,7 @@ const { loadConfig } = require('./configLoader');
 const { authorize } = require('./googleAuth');
 const { findLatestFileDateRecursive } = require('./fileUtils');
 const { getLatestMediaItem } = require('./googlePhotosApi');
+const { loadState, saveState } = require('./stateManager');
 
 // --- Configuration Loading ---
 const configPath = path.resolve(__dirname, '../config.json');
@@ -70,6 +71,10 @@ async function main() {
         process.exit(1); // Exit if authentication fails
     }
 
+    // --- Load State ---
+    let currentState = await loadState(config.stateFilePath, logger);
+    logger.info(`Current state loaded. Last sync timestamp: ${currentState.lastSyncTimestamp || 'Never'}`);
+
     // --- Startup Status Logging ---
     logger.info('Gathering startup status information...');
 
@@ -97,12 +102,21 @@ async function main() {
 
     // --- End Startup Status Logging ---
 
-    // TODO: Implement State Management (state.json loading/saving)
-    // TODO: Implement initial sync logic using authClient
-    // TODO: Implement incremental sync logic using authClient
+    // TODO: Implement initial sync logic using authClient and currentState
+    // TODO: Implement incremental sync logic using authClient and currentState
     // TODO: Implement background process/scheduling
 
     logger.info("Placeholder for core logic. Application will now exit.");
+
+    // --- Save State (Placeholder) ---
+    // In a real run, update the timestamp after a successful sync cycle
+    const newState = { ...currentState, lastSyncTimestamp: new Date().toISOString() };
+    try {
+        await saveState(config.stateFilePath, newState, logger);
+    } catch (error) {
+        logger.error(`Failed to save final state: ${error.message}`);
+        // Decide if this should prevent exit? For now, just log it.
+    }
 }
 
 main().catch(error => {

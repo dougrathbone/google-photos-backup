@@ -15,7 +15,8 @@
 
 - [x] Implement Google Photos API Authentication (OAuth 2.0)
 - [x] Add unit tests for `configLoader`, `fileUtils`, `googlePhotosApi`, `googleAuth`.
-- [ ] Implement State Management (`state.json` loading/saving)
+- [x] Implement State Management (`state.json` loading/saving) (`src/stateManager.js`).
+- [x] Add unit tests for `stateManager`.
 - [ ] Implement Initial Sync Logic
 - [ ] Implement Incremental Sync Logic
 - [ ] Develop `installer.sh` script
