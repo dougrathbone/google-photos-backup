@@ -172,6 +172,48 @@ describe('Google Photos API (using googlephotos library)', () => {
             expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(2);
              expect(mockLogger.error).toHaveBeenCalledWith(`Error fetching media items (page 2) via googlephotos: ${apiError.message}`);
         });
+
+        test('should stop fetching after maxPages if specified', async () => {
+            const item1 = { id: 'id1', filename: 'file1.jpg' };
+            const item2 = { id: 'id2', filename: 'file2.jpg' };
+            photosInstance.mediaItems.list
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'token1' }) // Page 1
+                .mockResolvedValueOnce({ mediaItems: [item2], nextPageToken: 'token2' }); // Page 2 (shouldn't be fetched)
+
+            const maxPages = 1;
+            const allItems = await getAllMediaItems(mockAccessToken, mockLogger, maxPages);
+
+            expect(allItems).toEqual([item1]); // Only item from page 1
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(1); // Called only once
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, null);
+            expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`Reached debug page limit (${maxPages}) for media items`));
+            expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Finished fetching media items. Total items found: 1'));
+        });
+         test('should fetch all pages if maxPages is 0', async () => {
+            const item1 = { id: 'id1' };
+            const item2 = { id: 'id2' };
+            photosInstance.mediaItems.list
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'token1' })
+                .mockResolvedValueOnce({ mediaItems: [item2], nextPageToken: null });
+
+            const allItems = await getAllMediaItems(mockAccessToken, mockLogger, 0);
+            expect(allItems).toEqual([item1, item2]);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(2);
+            expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('Reached debug page limit'));
+        });
+
+        test('should fetch all pages if maxPages is not provided', async () => {
+            const item1 = { id: 'id1' };
+            const item2 = { id: 'id2' };
+            photosInstance.mediaItems.list
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'token1' })
+                .mockResolvedValueOnce({ mediaItems: [item2], nextPageToken: null });
+
+            const allItems = await getAllMediaItems(mockAccessToken, mockLogger); // No maxPages arg
+            expect(allItems).toEqual([item1, item2]);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(2);
+            expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('Reached debug page limit'));
+        });
     });
 
     describe('getAllAlbums', () => {
@@ -203,6 +245,21 @@ describe('Google Photos API (using googlephotos library)', () => {
             photosInstance.albums.list.mockRejectedValue(apiError);
             await expect(getAllAlbums(mockAccessToken, mockLogger))
                 .rejects.toThrow(`Failed to fetch all albums: ${apiError.message}`);
+        });
+
+        test('should stop fetching after maxPages if specified', async () => {
+            const album1 = { id: 'album1', title: 'Trip' };
+            const album2 = { id: 'album2', title: 'Pets' };
+            photosInstance.albums.list
+                .mockResolvedValueOnce({ albums: [album1], nextPageToken: 'tokenA' })
+                .mockResolvedValueOnce({ albums: [album2], nextPageToken: 'tokenB' }); // Page 2 (shouldn't be fetched)
+
+            const maxPages = 1;
+            const allAlbums = await getAllAlbums(mockAccessToken, mockLogger, maxPages);
+
+            expect(allAlbums).toEqual([album1]);
+            expect(photosInstance.albums.list).toHaveBeenCalledTimes(1);
+            expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`Reached debug page limit (${maxPages}) for albums`));
         });
     });
     
@@ -238,6 +295,48 @@ describe('Google Photos API (using googlephotos library)', () => {
             await expect(getAlbumMediaItems(albumId, mockAccessToken, mockLogger))
                 .rejects.toThrow(`Failed to fetch items for album ${albumId}: ${apiError.message}`);
         });
+
+        test('should stop fetching after maxPages if specified', async () => {
+            const item1 = { id: 'idA', filename: 'fileA.jpg' };
+            const item2 = { id: 'idB', filename: 'fileB.jpg' };
+            photosInstance.mediaItems.search
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'tokenM' })
+                .mockResolvedValueOnce({ mediaItems: [item2], nextPageToken: 'tokenN' }); // Page 2 - shouldn't be called
+
+            const maxPages = 1;
+            const albumItems = await getAlbumMediaItems(albumId, mockAccessToken, mockLogger, maxPages);
+
+            expect(albumItems).toEqual([item1]);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledTimes(1);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledWith(albumId, 100, null);
+            expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`Reached debug page limit (${maxPages}) for album ${albumId}`));
+        });
+        
+        test('should fetch all pages if maxPages is 0', async () => {
+            const item1 = { id: 'idA' };
+            const item2 = { id: 'idB' };
+             photosInstance.mediaItems.search
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'tokenM' })
+                .mockResolvedValueOnce({ mediaItems: [item2], nextPageToken: null });
+            
+            let albumItems = await getAlbumMediaItems(albumId, mockAccessToken, mockLogger, 0);
+            expect(albumItems).toEqual([item1, item2]);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledTimes(2);
+            expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('Reached debug page limit'));
+        });
+
+        test('should fetch all pages if maxPages is not provided', async () => {
+            const item1 = { id: 'idA' };
+            const item2 = { id: 'idB' };
+             photosInstance.mediaItems.search
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'tokenM' })
+                .mockResolvedValueOnce({ mediaItems: [item2], nextPageToken: null });
+
+             const albumItems = await getAlbumMediaItems(albumId, mockAccessToken, mockLogger); // No maxPages arg
+             expect(albumItems).toEqual([item1, item2]);
+             expect(photosInstance.mediaItems.search).toHaveBeenCalledTimes(2);
+             expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('Reached debug page limit'));
+         });
     });
 
     describe('searchMediaItemsByDate', () => {

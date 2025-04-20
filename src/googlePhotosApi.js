@@ -43,11 +43,12 @@ async function getLatestMediaItem(accessToken, logger) {
  * Handles pagination based on common patterns (might need adjustment for this specific library).
  * @param {string} accessToken - The Google OAuth2 access token.
  * @param {winston.Logger} logger - The logger instance.
+ * @param {number} [maxPages=0] - Maximum number of pages to fetch (0 for no limit).
  * @returns {Promise<Array<object>>} A list of all media item objects.
  * @throws {Error} If a critical API error occurs.
  */
-async function getAllMediaItems(accessToken, logger) {
-    logger.info('Starting to fetch all media items using googlephotos library...');
+async function getAllMediaItems(accessToken, logger, maxPages = 0) {
+    logger.info('Starting to fetch all media items...' + (maxPages > 0 ? ` (Debug Limit: ${maxPages} pages)` : ''));
     const photos = new Photos(accessToken);
     const allMediaItems = [];
     let pageToken = null;
@@ -57,22 +58,25 @@ async function getAllMediaItems(accessToken, logger) {
     try {
         do {
             pageCount++;
+            if (maxPages > 0 && pageCount > maxPages) {
+                logger.warn(`Reached debug page limit (${maxPages}) for media items. Results may be incomplete.`);
+                break;
+            }
             logger.debug(`Fetching page ${pageCount} of media items...`);
-            // Assuming the list method takes pageSize and pageToken similar to googleapis
-            // This might need adjustment based on actual library behavior.
             const response = await photos.mediaItems.list(pageSize, pageToken);
 
-            const items = response.mediaItems;
-            if (items && items.length > 0) {
+            // Check response before accessing properties
+            if (response && response.mediaItems && response.mediaItems.length > 0) {
+                const items = response.mediaItems;
                 logger.info(`Fetched ${items.length} items on page ${pageCount}.`);
                 allMediaItems.push(...items);
             } else {
                 logger.info(`No items found on page ${pageCount}.`);
-                // Break if no items and no page token, otherwise could be an empty page
-                if (!response.nextPageToken) break;
+                // Break if no items and no next page token to avoid extra loop
+                if (!response?.nextPageToken) break; 
             }
-
-            pageToken = response.nextPageToken;
+            // Use optional chaining for safety
+            pageToken = response?.nextPageToken;
             if (pageToken) {
                 logger.debug(`Next page token received, continuing fetch...`);
             }
@@ -95,14 +99,15 @@ async function getAllMediaItems(accessToken, logger) {
 
 /**
  * Fetches all albums from the user's Google Photos library.
- * Handles pagination automatically.
+ * Handles pagination automatically. Stops after maxPages if provided.
  * @param {string} accessToken - The Google OAuth2 access token.
  * @param {winston.Logger} logger - The logger instance.
+ * @param {number} [maxPages=0] - Maximum number of pages to fetch (0 for no limit).
  * @returns {Promise<Array<object>>} A list of all album objects.
  * @throws {Error} If a critical API error occurs.
  */
-async function getAllAlbums(accessToken, logger) {
-    logger.info('Starting to fetch all albums...');
+async function getAllAlbums(accessToken, logger, maxPages = 0) {
+    logger.info('Starting to fetch albums...' + (maxPages > 0 ? ` (Debug Limit: ${maxPages} pages)` : ''));
     const photos = new Photos(accessToken);
     const albums = [];
     let pageToken = null;
@@ -112,6 +117,10 @@ async function getAllAlbums(accessToken, logger) {
     try {
         do {
             pageCount++;
+            if (maxPages > 0 && pageCount > maxPages) {
+                logger.warn(`Reached debug page limit (${maxPages}) for albums. Results may be incomplete.`);
+                break;
+            }
             logger.debug(`Fetching page ${pageCount} of albums...`);
             // Assuming the albums.list method takes pageSize and pageToken
             // This might need adjustment based on actual library behavior.
@@ -148,15 +157,16 @@ async function getAllAlbums(accessToken, logger) {
 
 /**
  * Searches for media items within a specific album.
- * Handles pagination automatically.
+ * Handles pagination automatically. Stops after maxPages if provided.
  * @param {string} albumId - The ID of the album to search within.
  * @param {string} accessToken - The Google OAuth2 access token.
  * @param {winston.Logger} logger - The logger instance.
+ * @param {number} [maxPages=0] - Maximum number of pages to fetch (0 for no limit).
  * @returns {Promise<Array<object>>} A list of all media item objects in the album.
  * @throws {Error} If a critical API error occurs.
  */
-async function getAlbumMediaItems(albumId, accessToken, logger) {
-    logger.info(`Starting to fetch media items for album ID: ${albumId}...`);
+async function getAlbumMediaItems(albumId, accessToken, logger, maxPages = 0) {
+    logger.info(`Fetching media items for album ID: ${albumId}...` + (maxPages > 0 ? ` (Debug Limit: ${maxPages} pages)` : ''));
     const photos = new Photos(accessToken);
     const mediaItems = [];
     let pageToken = null;
@@ -166,21 +176,25 @@ async function getAlbumMediaItems(albumId, accessToken, logger) {
     try {
         do {
             pageCount++;
+            if (maxPages > 0 && pageCount > maxPages) {
+                logger.warn(`Reached debug page limit (${maxPages}) for album ${albumId}. Album item results may be incomplete.`);
+                break;
+            }
             logger.debug(`Fetching page ${pageCount} of media items for album ${albumId}...`);
-            // Assuming the mediaItems.search method takes an albumId or filter object
-            // This might need adjustment based on actual library behavior.
             const response = await photos.mediaItems.search(albumId, pageSize, pageToken);
 
-            const items = response.mediaItems;
-            if (items && items.length > 0) {
+            // Check response before accessing properties
+            if (response && response.mediaItems && response.mediaItems.length > 0) {
+                const items = response.mediaItems;
                 logger.info(`Fetched ${items.length} items on page ${pageCount} for album ${albumId}.`);
                 mediaItems.push(...items);
             } else {
                 logger.info(`No items found on page ${pageCount} for album ${albumId}.`);
-                 if (!response.nextPageToken) break;
+                 // Break if no items and no next page token
+                 if (!response?.nextPageToken) break;
             }
-
-            pageToken = response.nextPageToken;
+            // Use optional chaining for safety
+            pageToken = response?.nextPageToken;
             if (pageToken) {
                 logger.debug(`Next page token received for album items, continuing fetch...`);
             }
@@ -258,11 +272,11 @@ async function searchMediaItemsByDate(startDateISO, endDateISO, accessToken, log
             // It might require constructing the filter differently or using specific options.
             const response = await photos.mediaItems.search(filters, pageSize, pageToken);
 
-            const items = response.mediaItems;
-            if (items && items.length > 0) {
+            // Check response before accessing properties
+            if (response && response.mediaItems && response.mediaItems.length > 0) {
                  // Filter results more precisely as the API date filter might be inclusive/exclusive differently than expected
                  // or might only filter by day, not time.
-                 const filteredItems = items.filter(item => {
+                 const filteredItems = response.mediaItems.filter(item => {
                      if (!item.mediaMetadata?.creationTime) return false;
                      const creationTime = new Date(item.mediaMetadata.creationTime);
                      // Filter should be: startDate < creationTime <= endDate
@@ -270,17 +284,18 @@ async function searchMediaItemsByDate(startDateISO, endDateISO, accessToken, log
                  });
 
                 if (filteredItems.length > 0) {
-                    logger.info(`Fetched ${items.length} items on page ${pageCount}, ${filteredItems.length} within precise date range.`);
+                    logger.info(`Fetched ${response.mediaItems.length} items on page ${pageCount}, ${filteredItems.length} within precise date range.`);
                     mediaItems.push(...filteredItems);
                 } else {
-                     logger.info(`Fetched ${items.length} items on page ${pageCount}, but none within precise date range.`);
+                     logger.info(`Fetched ${response.mediaItems.length} items on page ${pageCount}, but none within precise date range.`);
                 }
             } else {
                 logger.info(`No items found on page ${pageCount}.`);
-                 if (!response.nextPageToken) break;
+                 // Break if no items and no next page token
+                 if (!response?.nextPageToken) break;
             }
-
-            pageToken = response.nextPageToken;
+            // Use optional chaining for safety
+            pageToken = response?.nextPageToken;
             if (pageToken) {
                 logger.debug(`Next page token received, continuing date search...`);
             }

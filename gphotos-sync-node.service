@@ -1,0 +1,26 @@
+[Unit]
+Description=Google Photos Sync Node Service
+# Ensures network is available before starting
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# IMPORTANT: The paths below will be replaced by the installer script
+# with the actual installation paths.
+ExecStart=/path/to/installation/run.js
+WorkingDirectory=/path/to/installation
+
+# Restart the service if it fails
+Restart=on-failure
+RestartSec=5
+
+# Optional: Specify Node path if needed, especially if installed via nvm
+# Environment="PATH=/home/user/.nvm/versions/node/vXX.Y.Z/bin:/usr/bin:/bin"
+
+# For user services, User= and Group= are often not needed as it runs as the user
+# User=
+# Group=
+
+[Install]
+WantedBy=default.target 

@@ -3,5 +3,6 @@
   "syncIntervalHours": 6,
   "credentialsPath": "./client_credentials.json",
   "logFilePath": "./gphotos_sync.log",
-  "stateFilePath": "./sync_state.json"
+  "stateFilePath": "./sync_state.json",
+  "debugMaxPages": 0
 } 

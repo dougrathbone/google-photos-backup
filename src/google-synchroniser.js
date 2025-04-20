@@ -57,6 +57,11 @@ async function main() {
     logger.info(`Local sync directory: ${config.localSyncDirectory}`);
     logger.info(`Sync interval: ${config.syncIntervalHours} hours`);
 
+    // Log if debug mode is active
+    if (config.debugMaxPages && config.debugMaxPages > 0) {
+        logger.warn(`*** Debug mode enabled: Max ${config.debugMaxPages} pages will be fetched for initial sync. ***`);
+    }
+
     // --- Authentication ---
     let authResult = null;
     let accessToken = null; 
@@ -108,32 +113,32 @@ async function main() {
 
     // --- Synchronization Logic ---
     let syncSuccess = false;
-    let syncTimestamp = new Date(); // Timestamp for this sync run
+    let syncTimestamp = new Date(); 
     
     if (!lastSyncTime) {
-        // Run Initial Sync
+        // Run Initial Sync (pass full config)
         logger.info('Initial sync required (no previous sync timestamp found).');
         try {
-            const initialSyncResult = await runInitialSync(accessToken, config.localSyncDirectory, logger);
+            const initialSyncResult = await runInitialSync(accessToken, config, logger);
             syncSuccess = initialSyncResult.success; 
         } catch (error) {
             logger.error(`Initial sync failed with unhandled error: ${error.message}`);
             syncSuccess = false;
         }
     } else {
-        // Run Incremental Sync
+        // Run Incremental Sync (pass config for directory path)
         logger.info(`Incremental sync needed (Last sync: ${lastSyncTime}).`);
         try {
             const incrementalSyncResult = await runIncrementalSync(
                 lastSyncTime, 
                 accessToken, 
-                config.localSyncDirectory, 
+                config.localSyncDirectory, // Pass only the needed path 
                 logger
             );
             syncSuccess = incrementalSyncResult.success;
         } catch (error) {
-             logger.error(`Incremental sync failed with unhandled error: ${error.message}`);
-             syncSuccess = false;
+            logger.error(`Incremental sync failed with unhandled error: ${error.message}`);
+            syncSuccess = false;
         }
     }
 

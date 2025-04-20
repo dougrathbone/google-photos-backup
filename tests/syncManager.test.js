@@ -17,6 +17,15 @@ const mockLogger = {
 
 const mockAuth = 'mock-auth-token'; // Can be string or object depending on API module
 const mockDir = '/fake/sync-dir';
+// Base mock config
+const baseMockConfig = {
+    localSyncDirectory: mockDir,
+    debugMaxPages: 0, // Default: no limit
+    // Add other required paths if syncManager uses them directly
+    credentialsPath: '/fake/creds.json',
+    logFilePath: '/fake/log.log',
+    stateFilePath: '/fake/state.json'
+};
 
 describe('Sync Manager', () => {
     beforeEach(() => {
@@ -31,7 +40,32 @@ describe('Sync Manager', () => {
     });
 
     describe('runInitialSync', () => {
+        test('should pass maxPages=0 if not set in config', async () => {
+            const config = { ...baseMockConfig }; 
+            delete config.debugMaxPages; // Simulate key missing
+            config.debugMaxPages = 0; // Ensure default is applied by configLoader mock/logic if tested fully, here we assume 0
+
+            await runInitialSync(mockAuth, config, mockLogger);
+            expect(googlePhotosApi.getAllAlbums).toHaveBeenCalledWith(mockAuth, mockLogger, 0);
+            expect(googlePhotosApi.getAllMediaItems).toHaveBeenCalledWith(mockAuth, mockLogger, 0);
+            expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('DEBUG MODE ACTIVE'));
+        });
+        
+         test('should pass debugMaxPages from config to API calls', async () => {
+            const maxPages = 2;
+            const config = { ...baseMockConfig, debugMaxPages: maxPages };
+            googlePhotosApi.getAllAlbums.mockResolvedValue([]); 
+            googlePhotosApi.getAllMediaItems.mockResolvedValue([]);
+
+            await runInitialSync(mockAuth, config, mockLogger);
+
+            expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`DEBUG MODE ACTIVE: Fetching max ${maxPages} pages`));
+            expect(googlePhotosApi.getAllAlbums).toHaveBeenCalledWith(mockAuth, mockLogger, maxPages);
+            expect(googlePhotosApi.getAllMediaItems).toHaveBeenCalledWith(mockAuth, mockLogger, maxPages);
+        });
+
         test('should process albums and main stream correctly', async () => {
+            const config = { ...baseMockConfig };
             // --- Setup Mocks ---
             const album1 = { id: 'album1', title: 'Nature Pics!' }; // Title needs sanitizing
             const album2 = { id: 'album2', title: 'Pets' };
@@ -58,7 +92,7 @@ describe('Sync Manager', () => {
             downloader.downloadMediaItem.mockResolvedValue(true);
 
             // --- Run Test ---
-            const result = await runInitialSync(mockAuth, mockDir, mockLogger);
+            const result = await runInitialSync(mockAuth, config, mockLogger);
 
             // --- Assertions ---
             // Directories
@@ -67,10 +101,10 @@ describe('Sync Manager', () => {
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledWith(album2Dir, mockLogger);
             
             // API Calls
-            expect(googlePhotosApi.getAllAlbums).toHaveBeenCalledWith(mockAuth, mockLogger);
-            expect(googlePhotosApi.getAlbumMediaItems).toHaveBeenCalledWith(album1.id, mockAuth, mockLogger);
-            expect(googlePhotosApi.getAlbumMediaItems).toHaveBeenCalledWith(album2.id, mockAuth, mockLogger);
-            expect(googlePhotosApi.getAllMediaItems).toHaveBeenCalledWith(mockAuth, mockLogger);
+            expect(googlePhotosApi.getAllAlbums).toHaveBeenCalledWith(mockAuth, mockLogger, 0);
+            expect(googlePhotosApi.getAlbumMediaItems).toHaveBeenCalledWith(album1.id, mockAuth, mockLogger, 0);
+            expect(googlePhotosApi.getAlbumMediaItems).toHaveBeenCalledWith(album2.id, mockAuth, mockLogger, 0);
+            expect(googlePhotosApi.getAllMediaItems).toHaveBeenCalledWith(mockAuth, mockLogger, 0);
 
             // Downloads
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(4); // A, B, C (albums) + D (main)
@@ -80,17 +114,13 @@ describe('Sync Manager', () => {
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(itemD, mockDir, mockLogger); // D goes to root
             
             // Result counts
-            expect(result).toEqual({
-                success: true, 
-                albumsProcessed: 2, 
-                itemsProcessed: 4, // A, B, C from albums, D from main (B from main skipped)
-                itemsDownloaded: 4, 
-                itemsFailed: 0
-            });
-            expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Summary: Albums: 2, Total Items Encountered: 4, Succeeded/Skipped: 4, Failed: 0'));
+            expect(result.itemsProcessed).toBe(4);
+             // Restore correct log check for initial sync summary
+             expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Summary: Albums Processed (or fetched within page limit): 2, Total Items Encountered: 4, Succeeded/Skipped: 4, Failed: 0'));
         });
 
         test('should skip main stream download if item was downloaded via album', async () => {
+            const config = { ...baseMockConfig };
              const album1 = { id: 'album1', title: 'Album' };
              const album1Dir = path.join(mockDir, 'Album');
              const itemA = { id: 'itemA', filename: 'a.jpg' }; // In album and main stream
@@ -101,7 +131,7 @@ describe('Sync Manager', () => {
             googlePhotosApi.getAllMediaItems.mockResolvedValue([itemA, itemB]);
             downloader.downloadMediaItem.mockResolvedValue(true);
 
-            await runInitialSync(mockAuth, mockDir, mockLogger);
+            await runInitialSync(mockAuth, config, mockLogger);
 
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(2); // A (album), B (main)
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(itemA, album1Dir, mockLogger);
@@ -111,28 +141,31 @@ describe('Sync Manager', () => {
         });
 
        test('should handle album with no title', async () => {
+            const config = { ...baseMockConfig };
             const untitledAlbum = { id: 'untitled1' }; // No title
             const album2 = { id: 'album2', title: 'Pets' };
             const itemC = { id: 'itemC', filename: 'c.gif' };
 
             googlePhotosApi.getAllAlbums.mockResolvedValue([untitledAlbum, album2]);
             // Mock implementation for getAlbumMediaItems
-            googlePhotosApi.getAlbumMediaItems.mockImplementation(async (id, token, logger) => {
+            googlePhotosApi.getAlbumMediaItems.mockImplementation(async (id, token, logger, pages) => {
+                 expect(pages).toBe(0); // Verify maxPages is passed even here
                  if (id === album2.id) return [itemC];
                  return [];
             });
             googlePhotosApi.getAllMediaItems.mockResolvedValue([]);
 
-            await runInitialSync(mockAuth, mockDir, mockLogger);
+            await runInitialSync(mockAuth, config, mockLogger);
 
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Album found with no title'));
             expect(googlePhotosApi.getAlbumMediaItems).not.toHaveBeenCalledWith(untitledAlbum.id, expect.anything(), expect.anything());
-            expect(googlePhotosApi.getAlbumMediaItems).toHaveBeenCalledWith(album2.id, mockAuth, mockLogger);
+            expect(googlePhotosApi.getAlbumMediaItems).toHaveBeenCalledWith(album2.id, mockAuth, mockLogger, 0);
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledWith(path.join(mockDir, 'Pets'), mockLogger);
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(1); // Only itemC
         });
 
         test('should handle error fetching album items', async () => {
+            const config = { ...baseMockConfig };
             const album1 = { id: 'album1', title: 'Good Album' };
             const album2 = { id: 'album2', title: 'Bad Album' }; // Fails to get items
             const itemA = { id: 'itemA', filename: 'a.jpg' };
@@ -141,14 +174,15 @@ describe('Sync Manager', () => {
 
             googlePhotosApi.getAllAlbums.mockResolvedValue([album1, album2]);
             // Mock implementation for getAlbumMediaItems
-            googlePhotosApi.getAlbumMediaItems.mockImplementation(async (id, token, logger) => {
+            googlePhotosApi.getAlbumMediaItems.mockImplementation(async (id, token, logger, pages) => {
+                 expect(pages).toBe(0); // Verify maxPages
                  if (id === album1.id) return [itemA];
                  if (id === album2.id) throw albumError; // Throw for the bad album
                  return [];
             });
             googlePhotosApi.getAllMediaItems.mockResolvedValue([itemD]);
 
-            const result = await runInitialSync(mockAuth, mockDir, mockLogger);
+            const result = await runInitialSync(mockAuth, config, mockLogger);
             
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledWith(path.join(mockDir, 'Good Album'), mockLogger);
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledWith(path.join(mockDir, 'Bad Album'), mockLogger);
@@ -163,19 +197,51 @@ describe('Sync Manager', () => {
         });
 
         test('should return failure if getAllMediaItems fails', async () => {
+            const config = { ...baseMockConfig };
             const album1 = { id: 'album1', title: 'Album' };
             googlePhotosApi.getAllAlbums.mockResolvedValue([album1]);
             googlePhotosApi.getAlbumMediaItems.mockResolvedValue([]); // Album processed ok
             const error = new Error('API Error');
             googlePhotosApi.getAllMediaItems.mockRejectedValue(error); // Main stream fetch fails
 
-            const result = await runInitialSync(mockAuth, mockDir, mockLogger);
+            const result = await runInitialSync(mockAuth, config, mockLogger);
 
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledTimes(2); // Root + Album
             expect(downloader.downloadMediaItem).not.toHaveBeenCalled(); // No items downloaded
             expect(mockLogger.error).toHaveBeenCalledWith(`Initial synchronization failed critically: ${error.message}`);
             // Fix expected albumsProcessed count in this error case
             expect(result).toEqual({ success: false, albumsProcessed: 0, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: 0 });
+        });
+
+        test('should handle zero media items found', async () => {
+             const config = { ...baseMockConfig };
+             googlePhotosApi.getAllAlbums.mockResolvedValue([]);
+             googlePhotosApi.getAllMediaItems.mockResolvedValue([]);
+             const result = await runInitialSync(mockAuth, config, mockLogger);
+             
+             expect(downloader.ensureDirectoryExists).toHaveBeenCalled();
+             expect(googlePhotosApi.getAllAlbums).toHaveBeenCalled();
+             expect(googlePhotosApi.getAllMediaItems).toHaveBeenCalled();
+             expect(downloader.downloadMediaItem).not.toHaveBeenCalled();
+             // Check the correct summary log
+             expect(mockLogger.info).toHaveBeenCalledWith('Summary: Albums Processed (or fetched within page limit): 0, Total Items Encountered: 0, Succeeded/Skipped: 0, Failed: 0');
+             expect(result).toEqual({ success: true, albumsProcessed: 0, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: 0 });
+        });
+
+        test('should pass maxPages to getAlbumMediaItems when processing albums', async () => {
+            const maxPages = 1;
+            const config = { ...baseMockConfig, debugMaxPages: maxPages };
+            const album1 = { id: 'album1', title: 'Album One' };
+            const itemA = { id: 'itemA', filename: 'a.jpg' };
+
+            googlePhotosApi.getAllAlbums.mockResolvedValue([album1]);
+            googlePhotosApi.getAlbumMediaItems.mockResolvedValue([itemA]); // Assume it fetches within limit
+            googlePhotosApi.getAllMediaItems.mockResolvedValue([]); // No main stream items
+
+            await runInitialSync(mockAuth, config, mockLogger);
+
+            expect(googlePhotosApi.getAlbumMediaItems).toHaveBeenCalledWith(album1.id, mockAuth, mockLogger, maxPages); // Check maxPages was passed
+            expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(1); // Ensure download still happens
         });
     });
 

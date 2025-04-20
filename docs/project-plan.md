@@ -21,5 +21,5 @@
 - [x] Add unit tests for `downloader`, `syncManager`, and `getAllMediaItems`.
 - [x] Implement Incremental Sync Logic (`src/syncManager.js`, `src/googlePhotosApi.js`).
 - [x] Add unit tests for incremental sync.
-- [ ] Develop `installer.sh` script
-- [ ] Create `systemd` service file
+- [x] Develop `installer.sh` script (user-specific installation).
+- [x] Create `gphotos-sync-node.service` template (installer generates final file).

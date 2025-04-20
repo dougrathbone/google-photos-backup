@@ -4,15 +4,19 @@ const { ensureDirectoryExists, downloadMediaItem } = require('./downloader');
 
 /**
  * Performs the initial synchronization.
- * Fetches all albums and their contents, downloading items into album folders.
- * Then fetches all main library items and downloads any not already downloaded via albums.
+ * Fetches albums and media items, respecting debugMaxPages from config.
  * @param {string} accessToken - The Google OAuth2 access token.
- * @param {string} localDirectory - Absolute path to the root local download directory.
+ * @param {object} config - The loaded application configuration object.
  * @param {winston.Logger} logger - Logger instance.
  * @returns {Promise<{success: boolean, albumsProcessed: number, itemsProcessed: number, itemsDownloaded: number, itemsFailed: number}>}
  */
-async function runInitialSync(accessToken, localDirectory, logger) {
+async function runInitialSync(accessToken, config, logger) {
+    const localDirectory = config.localSyncDirectory;
+    const maxPages = config.debugMaxPages || 0; // Use 0 if null/undefined/false
     logger.info('Starting initial synchronization (including albums)...');
+    if (maxPages > 0) {
+        logger.warn(`*** DEBUG MODE ACTIVE: Fetching max ${maxPages} pages for albums and media items ***`);
+    }
     let albumsProcessed = 0;
     let itemsProcessed = 0; // Total items encountered (album + main library)
     let itemsDownloaded = 0; // Includes skipped existing files
@@ -23,10 +27,11 @@ async function runInitialSync(accessToken, localDirectory, logger) {
         // 1. Ensure the root directory exists
         await ensureDirectoryExists(localDirectory, logger);
 
-        // 2. Process Albums
+        // 2. Process Albums (pass maxPages)
         logger.info('--- Processing Albums ---');
-        const allAlbums = await getAllAlbums(accessToken, logger);
-        albumsProcessed = allAlbums.length;
+        const allAlbums = await getAllAlbums(accessToken, logger, maxPages);
+        albumsProcessed = allAlbums.length; 
+        // Note: albumsProcessed might be less than total if maxPages was hit
 
         for (const album of allAlbums) {
             if (!album.title) {
@@ -40,10 +45,10 @@ async function runInitialSync(accessToken, localDirectory, logger) {
             
             try {
                 await ensureDirectoryExists(albumDirectory, logger);
-                const albumItems = await getAlbumMediaItems(album.id, accessToken, logger);
+                const albumItems = await getAlbumMediaItems(album.id, accessToken, logger, maxPages);
                 itemsProcessed += albumItems.length; // Add to total count
 
-                logger.info(`Found ${albumItems.length} items in album "${safeAlbumTitle}"`);
+                logger.info(`Found ${albumItems.length} items in album "${safeAlbumTitle}"` + (maxPages > 0 && albumItems.length >= maxPages * 100 ? ' (Page limit may have been reached)' : '')); // Approx check
                 for (const item of albumItems) {
                     try {
                         const success = await downloadMediaItem(item, albumDirectory, logger);
@@ -68,9 +73,9 @@ async function runInitialSync(accessToken, localDirectory, logger) {
         }
         logger.info('--- Finished Processing Albums ---');
 
-        // 3. Process Main Library (items not in albums or already downloaded)
+        // 3. Process Main Library (pass maxPages)
         logger.info('--- Processing Main Photo Stream (excluding items already downloaded from albums) ---');
-        const allMainMediaItems = await getAllMediaItems(accessToken, logger);
+        const allMainMediaItems = await getAllMediaItems(accessToken, logger, maxPages);
         let mainStreamItemsAttempted = 0;
 
         for (const item of allMainMediaItems) {
@@ -100,7 +105,7 @@ async function runInitialSync(accessToken, localDirectory, logger) {
         logger.info('--- Finished Processing Main Stream ---');
 
         logger.info('Initial synchronization finished.');
-        logger.info(`Summary: Albums: ${albumsProcessed}, Total Items Encountered: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}`);
+        logger.info(`Summary: Albums Processed (or fetched within page limit): ${albumsProcessed}, Total Items Encountered: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}` + (maxPages > 0 ? ' (Page limit applied)' : ''));
         
         return { success: true, albumsProcessed, itemsProcessed, itemsDownloaded, itemsFailed };
 

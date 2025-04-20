@@ -22,7 +22,8 @@ describe('Config Loader', () => {
         syncIntervalHours: 1,
         credentialsPath: './creds.json',
         logFilePath: './app.log',
-        stateFilePath: './state.json'
+        stateFilePath: './state.json',
+        debugMaxPages: 0 // Default valid value
     };
 
     beforeEach(() => {
@@ -90,5 +91,41 @@ describe('Config Loader', () => {
         expect(() => {
             loadConfig(mockConfigPath);
         }).toThrow('Missing required configuration keys: logFilePath');
+    });
+
+    test('should load config successfully with valid optional debugMaxPages', () => {
+        fs.existsSync.mockReturnValue(true);
+        const configWithDebug = { ...baseConfigContent, debugMaxPages: 5 };
+        fs.readFileSync.mockReturnValue(JSON.stringify(configWithDebug));
+
+        const config = loadConfig(mockConfigPath);
+        expect(config.debugMaxPages).toBe(5);
+    });
+    
+    test('should default debugMaxPages to 0 if null or missing', () => {
+        fs.existsSync.mockReturnValue(true);
+        let configContent = { ...baseConfigContent };
+        delete configContent.debugMaxPages; // Test missing
+        fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+        let config = loadConfig(mockConfigPath);
+        expect(config.debugMaxPages).toBe(0);
+
+        configContent = { ...baseConfigContent, debugMaxPages: null }; // Test null
+        fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+        config = loadConfig(mockConfigPath);
+        expect(config.debugMaxPages).toBe(0);
+    });
+
+    test('should throw error if debugMaxPages is not a non-negative integer', () => {
+        fs.existsSync.mockReturnValue(true);
+        
+        const invalidValues = [-1, 1.5, 'abc', {}];
+        for (const invalidValue of invalidValues) {
+             const configContent = { ...baseConfigContent, debugMaxPages: invalidValue };
+             fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+             expect(() => {
+                 loadConfig(mockConfigPath);
+             }).toThrow('Invalid configuration: debugMaxPages must be a non-negative integer');
+        }
     });
 }); 
