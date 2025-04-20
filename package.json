@@ -1,0 +1,24 @@
+{
+  "name": "google-synchroniser",
+  "version": "1.0.0",
+  "description": "Google Photos synchronisation tool",
+  "main": "src/google-synchroniser.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "start": "node src/google-synchroniser.js",
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "googleapis": "^148.0.0",
+    "open": "^10.1.1",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
