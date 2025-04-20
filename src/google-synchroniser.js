@@ -5,7 +5,7 @@ const { authorize } = require('./googleAuth');
 const { findLatestFileDateRecursive } = require('./fileUtils');
 const { getLatestMediaItem } = require('./googlePhotosApi');
 const { loadState, saveState } = require('./stateManager');
-const { runInitialSync } = require('./syncManager');
+const { runInitialSync, runIncrementalSync } = require('./syncManager');
 
 // --- Configuration Loading ---
 const configPath = path.resolve(__dirname, '../config.json');
@@ -78,7 +78,8 @@ async function main() {
 
     // --- Load State ---
     let currentState = await loadState(config.stateFilePath, logger);
-    logger.info(`Current state loaded. Last sync timestamp: ${currentState.lastSyncTimestamp || 'Never'}`);
+    const lastSyncTime = currentState.lastSyncTimestamp;
+    logger.info(`Current state loaded. Last sync timestamp: ${lastSyncTime || 'Never'}`);
 
     // --- Startup Status Logging ---
     logger.info('Gathering startup status information...');
@@ -107,9 +108,10 @@ async function main() {
 
     // --- Synchronization Logic ---
     let syncSuccess = false;
-    const syncNeeded = !currentState.lastSyncTimestamp; // Basic check for initial sync
-
-    if (syncNeeded) {
+    let syncTimestamp = new Date(); // Timestamp for this sync run
+    
+    if (!lastSyncTime) {
+        // Run Initial Sync
         logger.info('Initial sync required (no previous sync timestamp found).');
         try {
             const initialSyncResult = await runInitialSync(accessToken, config.localSyncDirectory, logger);
@@ -119,23 +121,33 @@ async function main() {
             syncSuccess = false;
         }
     } else {
-        logger.info(`Incremental sync needed (Last sync: ${currentState.lastSyncTimestamp}). Logic not yet implemented.`);
-        // TODO: Implement incremental sync logic using accessToken and currentState
-        syncSuccess = true; // Placeholder: Assume success if no sync needed yet
+        // Run Incremental Sync
+        logger.info(`Incremental sync needed (Last sync: ${lastSyncTime}).`);
+        try {
+            const incrementalSyncResult = await runIncrementalSync(
+                lastSyncTime, 
+                accessToken, 
+                config.localSyncDirectory, 
+                logger
+            );
+            syncSuccess = incrementalSyncResult.success;
+        } catch (error) {
+             logger.error(`Incremental sync failed with unhandled error: ${error.message}`);
+             syncSuccess = false;
+        }
     }
 
     // --- Save State ---
-    if (syncNeeded && syncSuccess) {
-        const newState = { ...currentState, lastSyncTimestamp: new Date().toISOString() };
+    if (syncSuccess) {
+        // Save the timestamp of the *start* of the successful sync run
+        const newState = { ...currentState, lastSyncTimestamp: syncTimestamp.toISOString() };
         try {
             await saveState(config.stateFilePath, newState, logger);
         } catch (error) {
             logger.error(`Failed to save final state: ${error.message}`);
         }
-    } else if (!syncNeeded) {
-         logger.info('No sync run needed or logic not implemented, skipping state save.');
     } else {
-         logger.warn('Sync run failed, not updating state file.');
+         logger.warn('Sync run failed or was not needed, not updating state file timestamp.');
     }
 
     logger.info('Application finished.');

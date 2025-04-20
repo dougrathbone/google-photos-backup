@@ -200,4 +200,104 @@ async function getAlbumMediaItems(albumId, accessToken, logger) {
     }
 }
 
-module.exports = { getLatestMediaItem, getAllMediaItems, getAllAlbums, getAlbumMediaItems }; 
+/**
+ * Searches for media items created within a given date range.
+ * Handles pagination automatically.
+ * @param {string} startDateISO - ISO 8601 timestamp for the start of the range (exclusive).
+ * @param {string} endDateISO - ISO 8601 timestamp for the end of the range (inclusive).
+ * @param {string} accessToken - The Google OAuth2 access token.
+ * @param {winston.Logger} logger - The logger instance.
+ * @returns {Promise<Array<object>>} A list of media item objects created in the range.
+ * @throws {Error} If a critical API error occurs.
+ */
+async function searchMediaItemsByDate(startDateISO, endDateISO, accessToken, logger) {
+    logger.info(`Searching for media items created after ${startDateISO} up to ${endDateISO}...`);
+    const photos = new Photos(accessToken);
+    const mediaItems = [];
+    let pageToken = null;
+    let pageCount = 0;
+    const pageSize = 100;
+
+    // Construct the date filter
+    // Ensure dates are in the format Google API expects (YYYY, M, D)
+    // Note: The API uses creationTime metadata for filtering.
+    const startDate = new Date(startDateISO);
+    const endDate = new Date(endDateISO);
+    const filters = {
+        dateFilter: {
+            ranges: [{
+                // Convert to Date objects and extract year, month, day
+                // Adjust month (0-indexed) and potentially handle timezone carefully if needed
+                startDate: {
+                    year: startDate.getUTCFullYear(),
+                    month: startDate.getUTCMonth() + 1,
+                    day: startDate.getUTCDate()
+                },
+                endDate: {
+                    year: endDate.getUTCFullYear(),
+                    month: endDate.getUTCMonth() + 1,
+                    day: endDate.getUTCDate()
+                }
+            }]
+        },
+        // Include only non-archived media by default? Add if needed:
+        // includeArchivedMedia: false,
+        // contentFilter: {} // Add content filters if desired
+    };
+
+    logger.debug('Using date filter:', JSON.stringify(filters.dateFilter));
+
+    try {
+        do {
+            pageCount++;
+            logger.debug(`Fetching page ${pageCount} of media items by date range...`);
+            
+            // Assuming mediaItems.search accepts a filter object
+            // This part is speculative based on common API patterns and might need adjustment 
+            // depending on the exact behavior of the 'googlephotos' library's search method.
+            // It might require constructing the filter differently or using specific options.
+            const response = await photos.mediaItems.search(filters, pageSize, pageToken);
+
+            const items = response.mediaItems;
+            if (items && items.length > 0) {
+                 // Filter results more precisely as the API date filter might be inclusive/exclusive differently than expected
+                 // or might only filter by day, not time.
+                 const filteredItems = items.filter(item => {
+                     if (!item.mediaMetadata?.creationTime) return false;
+                     const creationTime = new Date(item.mediaMetadata.creationTime);
+                     // Filter should be: startDate < creationTime <= endDate
+                     return creationTime > startDate && creationTime <= endDate;
+                 });
+
+                if (filteredItems.length > 0) {
+                    logger.info(`Fetched ${items.length} items on page ${pageCount}, ${filteredItems.length} within precise date range.`);
+                    mediaItems.push(...filteredItems);
+                } else {
+                     logger.info(`Fetched ${items.length} items on page ${pageCount}, but none within precise date range.`);
+                }
+            } else {
+                logger.info(`No items found on page ${pageCount}.`);
+                 if (!response.nextPageToken) break;
+            }
+
+            pageToken = response.nextPageToken;
+            if (pageToken) {
+                logger.debug(`Next page token received, continuing date search...`);
+            }
+
+        } while (pageToken);
+
+        logger.info(`Finished searching by date. Total items found in range: ${mediaItems.length}`);
+        return mediaItems;
+
+    } catch (err) {
+        logger.error(`Error searching media items by date (page ${pageCount}) via googlephotos: ${err.message || err}`);
+         if (err.response?.data) {
+            logger.error('API Error Details:', err.response.data);
+        }
+        // NOTE: This call might fail due to API policy changes
+        throw new Error(`Failed to search media items by date: ${err.message || err}`);
+    }
+}
+
+module.exports = { getLatestMediaItem, getAllMediaItems, getAllAlbums, getAlbumMediaItems, searchMediaItemsByDate }; 

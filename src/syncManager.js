@@ -1,5 +1,5 @@
 const path = require('path');
-const { getAllMediaItems, getAllAlbums, getAlbumMediaItems } = require('./googlePhotosApi');
+const { getAllMediaItems, getAllAlbums, getAlbumMediaItems, searchMediaItemsByDate } = require('./googlePhotosApi');
 const { ensureDirectoryExists, downloadMediaItem } = require('./downloader');
 
 /**
@@ -111,6 +111,69 @@ async function runInitialSync(accessToken, localDirectory, logger) {
     }
 }
 
-// Future: Implement runIncrementalSync
+/**
+ * Performs an incremental synchronization based on the last sync timestamp.
+ * Fetches only new media items added since the last sync and downloads them.
+ * NOTE: This simplified version downloads new items to the root directory, 
+ *       ignoring potential new album memberships for simplicity.
+ * @param {string} lastSyncTimestamp - ISO 8601 timestamp of the last successful sync.
+ * @param {string} accessToken - The Google OAuth2 access token.
+ * @param {string} localDirectory - Absolute path to the root local download directory.
+ * @param {winston.Logger} logger - Logger instance.
+ * @returns {Promise<{success: boolean, itemsProcessed: number, itemsDownloaded: number, itemsFailed: number}>}
+ */
+async function runIncrementalSync(lastSyncTimestamp, accessToken, localDirectory, logger) {
+    logger.info(`Starting incremental synchronization since ${lastSyncTimestamp}...`);
+    let itemsProcessed = 0;
+    let itemsDownloaded = 0;
+    let itemsFailed = 0;
+    const syncStartTime = new Date(); // Use this as the end date for the search
 
-module.exports = { runInitialSync }; 
+    try {
+        // 1. Ensure the root directory exists (might not be strictly necessary, but safe)
+        await ensureDirectoryExists(localDirectory, logger);
+
+        // 2. Search for new media items since the last sync
+        const newMediaItems = await searchMediaItemsByDate(
+            lastSyncTimestamp, 
+            syncStartTime.toISOString(), 
+            accessToken, 
+            logger
+        );
+        itemsProcessed = newMediaItems.length;
+        logger.info(`Found ${itemsProcessed} new items since last sync.`);
+
+        // 3. Download new items
+        for (const item of newMediaItems) {
+            try {
+                 // Download directly to the root directory in this simplified version
+                const success = await downloadMediaItem(item, localDirectory, logger);
+                if (success) {
+                    itemsDownloaded++;
+                } else {
+                    itemsFailed++;
+                    logger.warn(`Failed to process new item ${item.id} (${item.filename})`);
+                }
+            } catch (downloadError) {
+                itemsFailed++;
+                logger.error(`Critical error downloading new item ${item.id} (${item.filename}): ${downloadError.message}`);
+                // Decide whether to continue or stop? Log and continue.
+            }
+            // Optional delay
+            // await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        logger.info('Incremental synchronization finished.');
+        logger.info(`Summary: New Items Found: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}`);
+        
+        // Consider successful if it ran through all new items without critical API errors
+        return { success: true, itemsProcessed, itemsDownloaded, itemsFailed };
+
+    } catch (error) {
+        // Catch critical errors from ensureDirectoryExists or searchMediaItemsByDate
+        logger.error(`Incremental synchronization failed critically: ${error.message}`);
+        return { success: false, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: itemsProcessed };
+    }
+}
+
+module.exports = { runInitialSync, runIncrementalSync }; 

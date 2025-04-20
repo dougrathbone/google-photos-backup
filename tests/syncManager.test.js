@@ -1,5 +1,5 @@
 const path = require('path'); // Ensure path is required
-const { runInitialSync } = require('../src/syncManager');
+const { runInitialSync, runIncrementalSync } = require('../src/syncManager');
 const googlePhotosApi = require('../src/googlePhotosApi');
 const downloader = require('../src/downloader');
 
@@ -25,6 +25,7 @@ describe('Sync Manager', () => {
         googlePhotosApi.getAllMediaItems.mockResolvedValue([]);
         googlePhotosApi.getAllAlbums.mockResolvedValue([]);
         googlePhotosApi.getAlbumMediaItems.mockResolvedValue([]);
+        googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([]); // Add default for search
         downloader.ensureDirectoryExists.mockResolvedValue();
         downloader.downloadMediaItem.mockResolvedValue(true);
     });
@@ -175,6 +176,90 @@ describe('Sync Manager', () => {
             expect(mockLogger.error).toHaveBeenCalledWith(`Initial synchronization failed critically: ${error.message}`);
             // Fix expected albumsProcessed count in this error case
             expect(result).toEqual({ success: false, albumsProcessed: 0, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: 0 });
+        });
+    });
+
+    describe('runIncrementalSync', () => {
+        const lastSyncTime = '2024-03-10T00:00:00.000Z';
+
+        test('should ensure directory, search for new items, and download them', async () => {
+            const newItem1 = { id: 'new1', filename: 'new1.jpg' };
+            const newItem2 = { id: 'new2', filename: 'new2.png' };
+            // Mock search results
+            googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([newItem1, newItem2]);
+            downloader.downloadMediaItem.mockResolvedValue(true); // Downloads succeed
+
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, mockDir, mockLogger);
+
+            expect(downloader.ensureDirectoryExists).toHaveBeenCalledWith(mockDir, mockLogger);
+            expect(googlePhotosApi.searchMediaItemsByDate).toHaveBeenCalledWith(
+                lastSyncTime, 
+                expect.any(String), // Check that current time is passed as end date
+                mockAuth, 
+                mockLogger
+            );
+            expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(2);
+            expect(downloader.downloadMediaItem).toHaveBeenCalledWith(newItem1, mockDir, mockLogger); // Downloaded to root
+            expect(downloader.downloadMediaItem).toHaveBeenCalledWith(newItem2, mockDir, mockLogger);
+            expect(mockLogger.info).toHaveBeenCalledWith(`Starting incremental synchronization since ${lastSyncTime}...`);
+            expect(mockLogger.info).toHaveBeenCalledWith('Found 2 new items since last sync.');
+            expect(mockLogger.info).toHaveBeenCalledWith('Incremental synchronization finished.');
+            expect(mockLogger.info).toHaveBeenCalledWith('Summary: New Items Found: 2, Succeeded/Skipped: 2, Failed: 0');
+            expect(result).toEqual({ success: true, itemsProcessed: 2, itemsDownloaded: 2, itemsFailed: 0 });
+        });
+
+        test('should handle zero new items found', async () => {
+            googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([]); // No new items
+
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, mockDir, mockLogger);
+
+            expect(googlePhotosApi.searchMediaItemsByDate).toHaveBeenCalled();
+            expect(downloader.downloadMediaItem).not.toHaveBeenCalled();
+            expect(mockLogger.info).toHaveBeenCalledWith('Found 0 new items since last sync.');
+            expect(mockLogger.info).toHaveBeenCalledWith('Summary: New Items Found: 0, Succeeded/Skipped: 0, Failed: 0');
+            expect(result).toEqual({ success: true, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: 0 });
+        });
+
+        test('should handle download failures for new items', async () => {
+            const newItem1 = { id: 'new1', filename: 'new1.jpg' };
+            const newItem2 = { id: 'new2', filename: 'new2.png' }; // Fails
+            googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([newItem1, newItem2]);
+            downloader.downloadMediaItem
+                .mockResolvedValueOnce(true)
+                .mockResolvedValueOnce(false);
+
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, mockDir, mockLogger);
+
+            expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(2);
+            expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to process new item new2'));
+            expect(mockLogger.info).toHaveBeenCalledWith('Summary: New Items Found: 2, Succeeded/Skipped: 1, Failed: 1');
+            expect(result).toEqual({ success: true, itemsProcessed: 2, itemsDownloaded: 1, itemsFailed: 1 });
+        });
+
+         test('should handle critical download errors for new items', async () => {
+            const newItem1 = { id: 'new1', filename: 'new1.jpg' };
+            const downloadError = new Error('Disk space error');
+            googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([newItem1]);
+            downloader.downloadMediaItem.mockRejectedValue(downloadError);
+                
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, mockDir, mockLogger);
+
+            expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(1);
+            expect(mockLogger.error).toHaveBeenCalledWith(`Critical error downloading new item ${newItem1.id} (${newItem1.filename}): ${downloadError.message}`);
+            expect(mockLogger.info).toHaveBeenCalledWith('Summary: New Items Found: 1, Succeeded/Skipped: 0, Failed: 1');
+            expect(result).toEqual({ success: true, itemsProcessed: 1, itemsDownloaded: 0, itemsFailed: 1 });
+        });
+
+        test('should return failure if searchMediaItemsByDate fails', async () => {
+            const error = new Error('API Search Error');
+            googlePhotosApi.searchMediaItemsByDate.mockRejectedValue(error);
+
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, mockDir, mockLogger);
+
+            expect(downloader.ensureDirectoryExists).toHaveBeenCalled();
+            expect(downloader.downloadMediaItem).not.toHaveBeenCalled();
+            expect(mockLogger.error).toHaveBeenCalledWith(`Incremental synchronization failed critically: ${error.message}`);
+            expect(result).toEqual({ success: false, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: 0 });
         });
     });
 }); 

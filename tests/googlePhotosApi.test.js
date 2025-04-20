@@ -3,7 +3,8 @@ const {
     getLatestMediaItem, 
     getAllMediaItems, 
     getAllAlbums, 
-    getAlbumMediaItems 
+    getAlbumMediaItems,
+    searchMediaItemsByDate
 } = require('../src/googlePhotosApi');
 
 // Mock the googlephotos library
@@ -237,5 +238,69 @@ describe('Google Photos API (using googlephotos library)', () => {
             await expect(getAlbumMediaItems(albumId, mockAccessToken, mockLogger))
                 .rejects.toThrow(`Failed to fetch items for album ${albumId}: ${apiError.message}`);
         });
+    });
+
+    describe('searchMediaItemsByDate', () => {
+        const startDate = '2024-01-15T10:00:00.000Z';
+        const endDate = '2024-01-15T12:00:00.000Z';
+        const expectedFilter = {
+             dateFilter: { 
+                 ranges: [ 
+                     { 
+                         startDate: { year: 2024, month: 1, day: 15 }, 
+                         endDate: { year: 2024, month: 1, day: 15 } 
+                     } 
+                 ]
+             }
+         };
+
+        test('should search using correct date filter and handle pagination', async () => {
+            const item1 = { id: 'id1', mediaMetadata: { creationTime: '2024-01-15T10:30:00Z' } }; // In range
+            const item2 = { id: 'id2', mediaMetadata: { creationTime: '2024-01-15T11:59:59Z' } }; // In range
+            const item3 = { id: 'id3', mediaMetadata: { creationTime: '2024-01-15T12:00:00Z' } }; // In range (inclusive end)
+            
+            photosInstance.mediaItems.search
+                .mockResolvedValueOnce({ mediaItems: [item1, item2], nextPageToken: 'tokenS' })
+                .mockResolvedValueOnce({ mediaItems: [item3], nextPageToken: null });
+            
+            const results = await searchMediaItemsByDate(startDate, endDate, mockAccessToken, mockLogger);
+
+            expect(results).toEqual([item1, item2, item3]);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledTimes(2);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledWith(expectedFilter, 100, null);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledWith(expectedFilter, 100, 'tokenS');
+        });
+
+        test('should perform client-side filtering for precise time range', async () => {
+            const itemBefore = { id: 'id0', mediaMetadata: { creationTime: '2024-01-15T09:59:59Z' } }; // Before range
+            const itemStart = { id: 'id1', mediaMetadata: { creationTime: '2024-01-15T10:00:00Z' } }; // Equal to start (excluded)
+            const itemMid = { id: 'id2', mediaMetadata: { creationTime: '2024-01-15T11:00:00Z' } }; // In range
+            const itemEnd = { id: 'id3', mediaMetadata: { creationTime: '2024-01-15T12:00:00Z' } }; // Equal to end (included)
+            const itemAfter = { id: 'id4', mediaMetadata: { creationTime: '2024-01-15T12:00:01Z' } }; // After range
+
+            // Assume API returns items potentially outside the precise time due to day-based filtering
+            photosInstance.mediaItems.search.mockResolvedValue({ mediaItems: [itemBefore, itemStart, itemMid, itemEnd, itemAfter], nextPageToken: null });
+            
+            const results = await searchMediaItemsByDate(startDate, endDate, mockAccessToken, mockLogger);
+
+            // Only items strictly between start (exclusive) and end (inclusive) should remain
+            expect(results).toEqual([itemMid, itemEnd]);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledTimes(1);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledWith(expectedFilter, 100, null);
+            expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Fetched 5 items on page 1, 2 within precise date range'));
+        });
+
+        test('should return empty array if search yields no results', async () => {
+            photosInstance.mediaItems.search.mockResolvedValue({ mediaItems: [], nextPageToken: null });
+            const results = await searchMediaItemsByDate(startDate, endDate, mockAccessToken, mockLogger);
+            expect(results).toEqual([]);
+        });
+
+         test('should throw error on API failure', async () => {
+             const apiError = new Error('Search Failed');
+             photosInstance.mediaItems.search.mockRejectedValue(apiError);
+             await expect(searchMediaItemsByDate(startDate, endDate, mockAccessToken, mockLogger))
+                 .rejects.toThrow(`Failed to search media items by date: ${apiError.message}`);
+         });
     });
 }); 
