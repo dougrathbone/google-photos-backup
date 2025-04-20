@@ -29,8 +29,8 @@ This document outlines the requirements for a new Linux application, `gphotos-sy
 
 * **Authentication:**
     * Must use OAuth 2.0 to authenticate with the Google Photos API.
-    * Requires a mechanism for the user to grant initial permission (likely involving copying/pasting an auth code or URL).
-    * Credentials (tokens) must be stored securely.
+    * Requires a mechanism for the user to grant initial permission: the application will print an authorization URL to the console. The user must visit this URL in a browser, grant permission, and then paste the resulting authorization code back into the application when prompted.
+    * Credentials (OAuth tokens) must be stored securely (e.g., in the file specified by `stateFilePath` with restricted permissions).
 * **Configuration (`config.json`):**
     * Must read configuration from a `config.json` file.
     * Minimum configurable parameters:
@@ -100,18 +100,16 @@ This document outlines the requirements for a new Linux application, `gphotos-sy
 
 To make this PRD even more useful for code generation, please consider these points:
 
-1.  **Authentication Flow:** The Google Photos API likely requires user interaction via a web browser for the initial OAuth grant. How should the script handle this? (e.g., Print a URL for the user to visit, wait for them to paste back a code? Use a temporary local webserver for the redirect?)
 2.  **Local Folder Structure:** How should the downloaded photos and videos be organized within the `localSyncDirectory`?
     * a) Flat structure (all files directly in the directory)?
     * b) Organized by date (e.g., `YYYY/MM/DD/filename.jpg`)?
-    * c) Organized by Album (this adds complexity as items can be in multiple albums)?
+    * c) Organized by Album (this adds complexity as items can be in multiple albums)? - Current implementation uses root for non-album items and subdirs for albums.
 3.  **Filename Conflicts:** How should potential filename conflicts be handled if Google Photos allows duplicate filenames (though media items have unique IDs)? (e.g., Append ID? Add a counter?)
 4.  **Specific Sync Logic:** Should the incremental sync rely purely on querying for items newer than the `lastSyncTimestamp`, or should it also cross-reference against the `downloadedMediaIds` in `state.json` just in case? (Timestamp is usually sufficient and more efficient).
 5.  **Handling Deletions:** For this initial version, we are explicitly *not* handling deletions. Is that correct? (i.e., if a user deletes a photo in Google Photos, the local copy remains).
 6.  **Error Handling Specifics:** Any specific requirements for retries? (e.g., How many times to retry on network error? How long to wait between retries?)
 7.  **Logging Level:** Should the logging level (e.g., INFO, DEBUG, WARN, ERROR) be configurable?
 8.  **Installation Scope:** Should the installer target a system-wide installation (requiring root/sudo, installing to `/etc/systemd/system`, `/opt/`) or a user-specific installation (installing to `~/.config/systemd/user/`, `~/.local/share/`)? User-specific is often easier and safer.
-9.  **Node.js Version:** Is there a minimum required Node.js version? (e.g., latest LTS?)
 10. **API Credentials Storage:** While `credentialsPath` is in `config.json`, the *actual* token file should likely have restricted permissions. Should the installer script attempt to set these permissions (e.g., `chmod 600`)?
 
 Once you provide answers or preferences for these questions, we can refine the PRD further, making it a stronger guide for Gemini.

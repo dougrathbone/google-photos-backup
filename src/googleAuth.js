@@ -3,7 +3,7 @@ const path = require('path');
 const process = require('process');
 // const { authenticate } = require('@google-cloud/local-auth'); // Removed unused import
 const { google } = require('googleapis');
-const open = require('open');
+// const open = require('open'); // Removed library
 const readline = require('readline');
 
 // If modifying these scopes, delete token.json.
@@ -75,7 +75,8 @@ function getCodeFromTerminal() {
             input: process.stdin,
             output: process.stdout,
         });
-        rl.question('Enter the authorization code from that page here: ', (code) => {
+        // Add extra newline for clarity
+        rl.question('\nEnter the authorization code from that page here: ', (code) => {
             rl.close();
             resolve(code.trim());
         });
@@ -144,6 +145,12 @@ async function authorize(clientSecretsPath, tokenPath, logger) {
             prompt: 'consent', // Ensure user sees consent screen even if previously authorized
         });
 
+        // Log the URL clearly for the user
+        logger.info('Authorize this app by visiting this url:');
+        logger.info(authUrl);
+        console.log('\n--------------------------------------------------------------------------------');
+        console.log('Please open the following URL in your browser to authorize the application:');
+        console.log(authUrl);
         logger.info(`Authorize this app by visiting this url: ${authUrl}`);
         try {
             await open(authUrl);

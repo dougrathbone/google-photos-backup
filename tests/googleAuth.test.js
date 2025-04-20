@@ -54,7 +54,7 @@ jest.mock('googleapis', () => ({
     },
 }));
 
-jest.mock('open', () => jest.fn());
+// jest.mock('open', () => jest.fn()); // Remove open mock
 
 jest.mock('readline', () => {
     const mockReadlineQuestion = jest.fn();
@@ -73,7 +73,7 @@ jest.mock('readline', () => {
 
 const fs = require('fs').promises; // Require fs AFTER mock is applied
 const { google } = require('googleapis');
-const open = require('open');
+// const open = require('open'); // Remove require
 const readline = require('readline');
 const { authorize } = require('../src/googleAuth');
 
@@ -122,7 +122,7 @@ describe('Google Auth', () => {
         mockGetToken.mockReset();
         mockSetCredentials.mockReset();
         
-        require('open').mockClear(); 
+        // require('open').mockClear(); // Remove reset for open
     });
 
     // --- Tests --- 
@@ -195,7 +195,7 @@ describe('Google Auth', () => {
         expect(fs.readFile).toHaveBeenCalledWith(mockClientSecretsPath);
         expect(mockOAuth2).toHaveBeenCalledWith('test-client-id', 'test-client-secret', 'urn:ietf:wg:oauth:2.0:oob');
         expect(mockGenerateAuthUrl).toHaveBeenCalled();
-        expect(require('open')).toHaveBeenCalledWith('http://fakeauth.url');
+        expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Authorize this app by visiting'));
         expect(readlineMock.__mockReadlineQuestion).toHaveBeenCalled();
         expect(mockGetToken).toHaveBeenCalledWith('test-code');
         expect(mockSetCredentials).toHaveBeenCalledWith({ access_token: newToken, refresh_token: 'new-refresh' });
@@ -290,22 +290,5 @@ describe('Google Auth', () => {
         expect(result).toBeNull();
 
         expect(mockLogger.error).toHaveBeenCalledWith('Authorization process failed:', expect.stringContaining(saveError.message));
-    });
-
-     test('should handle open failure gracefully', async () => {
-        fs.readFile.mockRejectedValueOnce({ code: 'ENOENT' }); 
-        fs.readFile.mockResolvedValueOnce(JSON.stringify(mockClientSecretsContent));
-        mockGenerateAuthUrl.mockReturnValue('http://fakeauth.url');
-        require('open').mockRejectedValueOnce(new Error('Browser not found'));
-        const readlineMock = require('readline');
-        readlineMock.__mockReadlineQuestion.mockImplementation((query, callback) => callback('test-code'));
-        mockGetToken.mockResolvedValue({ tokens: { access_token: 'new-access-token' } });
-        mockOAuth2(); 
-
-        await authorize(mockClientSecretsPath, mockTokenPath, mockLogger);
-
-        expect(require('open')).toHaveBeenCalledWith('http://fakeauth.url');
-        expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to automatically open browser'));
-        expect(readlineMock.__mockReadlineQuestion).toHaveBeenCalled(); 
     });
 });
