@@ -2,6 +2,8 @@ const path = require('path');
 const winston = require('winston');
 const { loadConfig } = require('./configLoader');
 const { authorize } = require('./googleAuth');
+const { findLatestFileDateRecursive } = require('./fileUtils');
+const { getLatestMediaItem } = require('./googlePhotosApi');
 
 // --- Configuration Loading ---
 const configPath = path.resolve(__dirname, '../config.json');
@@ -68,6 +70,34 @@ async function main() {
         process.exit(1); // Exit if authentication fails
     }
 
+    // --- Startup Status Logging ---
+    logger.info('Gathering startup status information...');
+
+    // 1. Check latest local file date
+    const latestLocalDate = await findLatestFileDateRecursive(config.localSyncDirectory, logger);
+    if (latestLocalDate) {
+        logger.info(`Latest file date found in local directory (${config.localSyncDirectory}): ${latestLocalDate.toISOString()}`);
+    } else {
+        logger.info(`No files found or error scanning local directory (${config.localSyncDirectory}). Assuming full sync needed.`);
+    }
+
+    // 2. Check latest Google Photos date
+    const latestMediaItem = await getLatestMediaItem(authClient, logger);
+    if (latestMediaItem && latestMediaItem.mediaMetadata && latestMediaItem.mediaMetadata.creationTime) {
+        logger.info(`Latest media item creation time in Google Photos: ${latestMediaItem.mediaMetadata.creationTime}`);
+        // Optional: Log filename if useful
+        // logger.info(`Latest media item filename: ${latestMediaItem.filename}`);
+    } else {
+        logger.warn('Could not determine the latest media item date from Google Photos.');
+    }
+
+    // 3. Sync difference (Placeholder)
+    // TODO: Implement state management and sync logic to calculate this accurately.
+    logger.info('Sync difference calculation pending implementation of state management and sync logic.');
+
+    // --- End Startup Status Logging ---
+
+    // TODO: Implement State Management (state.json loading/saving)
     // TODO: Implement initial sync logic using authClient
     // TODO: Implement incremental sync logic using authClient
     // TODO: Implement background process/scheduling

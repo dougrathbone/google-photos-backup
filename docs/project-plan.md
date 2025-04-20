@@ -14,6 +14,7 @@
 ## Next Steps
 
 - [x] Implement Google Photos API Authentication (OAuth 2.0)
+- [x] Add unit tests for `configLoader`, `fileUtils`, `googlePhotosApi`, `googleAuth`.
 - [ ] Implement State Management (`state.json` loading/saving)
 - [ ] Implement Initial Sync Logic
 - [ ] Implement Incremental Sync Logic
