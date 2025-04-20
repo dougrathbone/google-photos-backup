@@ -5,6 +5,7 @@ const { authorize } = require('./googleAuth');
 const { findLatestFileDateRecursive } = require('./fileUtils');
 const { getLatestMediaItem } = require('./googlePhotosApi');
 const { loadState, saveState } = require('./stateManager');
+const { runInitialSync } = require('./syncManager');
 
 // --- Configuration Loading ---
 const configPath = path.resolve(__dirname, '../config.json');
@@ -57,16 +58,20 @@ async function main() {
     logger.info(`Sync interval: ${config.syncIntervalHours} hours`);
 
     // --- Authentication ---
-    let authClient;
+    let authResult = null;
+    let accessToken = null; 
+    let authClient = null; 
+    
     try {
-        // Pass the client secrets path from config
-        // Pass the explicit path './credentials.js' for the OAuth token
-        // Pass the logger instance
-        const oauthTokenPath = path.resolve(__dirname, '../credentials.js'); // Resolve path relative to project root
-        authClient = await authorize(config.credentialsPath, oauthTokenPath, logger);
-        logger.info('Google Photos API client authorized successfully.');
+        authResult = await authorize(config.credentialsPath, config.stateFilePath, logger);
+        if (!authResult) {
+            throw new Error('Authorization returned null. Cannot proceed.');
+        }
+        accessToken = authResult.accessToken;
+        authClient = authResult.client;
+        logger.info('Google Photos API access token acquired successfully.');
     } catch (error) {
-        logger.error('Failed to authenticate with Google Photos API:', error.message);
+        logger.error('Failed to authenticate or acquire access token:', error.message);
         logger.error('Please check your client_secret.json configuration and ensure you completed the authentication flow.');
         process.exit(1); // Exit if authentication fails
     }
@@ -87,7 +92,7 @@ async function main() {
     }
 
     // 2. Check latest Google Photos date
-    const latestMediaItem = await getLatestMediaItem(authClient, logger);
+    const latestMediaItem = await getLatestMediaItem(accessToken, logger);
     if (latestMediaItem && latestMediaItem.mediaMetadata && latestMediaItem.mediaMetadata.creationTime) {
         logger.info(`Latest media item creation time in Google Photos: ${latestMediaItem.mediaMetadata.creationTime}`);
         // Optional: Log filename if useful
@@ -100,23 +105,40 @@ async function main() {
     // TODO: Implement state management and sync logic to calculate this accurately.
     logger.info('Sync difference calculation pending implementation of state management and sync logic.');
 
-    // --- End Startup Status Logging ---
+    // --- Synchronization Logic ---
+    let syncSuccess = false;
+    const syncNeeded = !currentState.lastSyncTimestamp; // Basic check for initial sync
 
-    // TODO: Implement initial sync logic using authClient and currentState
-    // TODO: Implement incremental sync logic using authClient and currentState
-    // TODO: Implement background process/scheduling
-
-    logger.info("Placeholder for core logic. Application will now exit.");
-
-    // --- Save State (Placeholder) ---
-    // In a real run, update the timestamp after a successful sync cycle
-    const newState = { ...currentState, lastSyncTimestamp: new Date().toISOString() };
-    try {
-        await saveState(config.stateFilePath, newState, logger);
-    } catch (error) {
-        logger.error(`Failed to save final state: ${error.message}`);
-        // Decide if this should prevent exit? For now, just log it.
+    if (syncNeeded) {
+        logger.info('Initial sync required (no previous sync timestamp found).');
+        try {
+            const initialSyncResult = await runInitialSync(accessToken, config.localSyncDirectory, logger);
+            syncSuccess = initialSyncResult.success; 
+        } catch (error) {
+            logger.error(`Initial sync failed with unhandled error: ${error.message}`);
+            syncSuccess = false;
+        }
+    } else {
+        logger.info(`Incremental sync needed (Last sync: ${currentState.lastSyncTimestamp}). Logic not yet implemented.`);
+        // TODO: Implement incremental sync logic using accessToken and currentState
+        syncSuccess = true; // Placeholder: Assume success if no sync needed yet
     }
+
+    // --- Save State ---
+    if (syncNeeded && syncSuccess) {
+        const newState = { ...currentState, lastSyncTimestamp: new Date().toISOString() };
+        try {
+            await saveState(config.stateFilePath, newState, logger);
+        } catch (error) {
+            logger.error(`Failed to save final state: ${error.message}`);
+        }
+    } else if (!syncNeeded) {
+         logger.info('No sync run needed or logic not implemented, skipping state save.');
+    } else {
+         logger.warn('Sync run failed, not updating state file.');
+    }
+
+    logger.info('Application finished.');
 }
 
 main().catch(error => {

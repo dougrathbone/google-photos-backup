@@ -1,30 +1,20 @@
-const { google } = require('googleapis');
-const { getLatestMediaItem } = require('../src/googlePhotosApi');
+const Photos = require('googlephotos');
+const { getLatestMediaItem, getAllMediaItems } = require('../src/googlePhotosApi');
 
-// Mock googleapis
-const mockMediaItemsList = jest.fn();
-jest.mock('googleapis', () => ({
-    google: {
-        // Mock the function call 'google.photoslibrary('v1')'
-        photoslibrary: jest.fn(() => ({
+// Mock the googlephotos library
+jest.mock('googlephotos', () => {
+    // Mock the constructor
+    return jest.fn().mockImplementation((token) => {
+        // Mock the instance methods we use
+        return {
             mediaItems: {
-                list: mockMediaItemsList,
+                list: jest.fn(), // Mock the list method
+                // search: jest.fn() // Mock search if we used it
             },
-        })),
-        // Include auth setup needed by googleAuth tests if run together
-        auth: {
-            fromJSON: jest.fn(),
-            OAuth2: jest.fn().mockImplementation(() => ({
-                generateAuthUrl: jest.fn(),
-                getToken: jest.fn(),
-                setCredentials: jest.fn(),
-                _clientId: 'test-client-id',
-                _clientSecret: 'test-client-secret',
-                credentials: { refresh_token: 'test-refresh-token' },
-            })),
-        }
-    },
-}));
+            // Add mocks for other top-level methods if needed (e.g., albums.list)
+        };
+    });
+});
 
 // Mock logger
 const mockLogger = {
@@ -34,75 +24,128 @@ const mockLogger = {
     debug: jest.fn(),
 };
 
-// Mock auth client
-const mockAuthClient = { /* Just needs to be an object */ };
+const mockAccessToken = 'test-access-token';
 
-describe('Google Photos API', () => {
+describe('Google Photos API (using googlephotos library)', () => {
+    // Get the mock constructor itself
+    const MockPhotos = Photos; 
+    let photosInstance;
+
     beforeEach(() => {
         jest.clearAllMocks();
-        // Reset mock implementation for list
-        mockMediaItemsList.mockReset();
-    });
-
-    test('getLatestMediaItem should return the latest item successfully', async () => {
-        const mockItem = {
-            id: 'test-id',
-            filename: 'latest.jpg',
-            mediaMetadata: { creationTime: '2023-10-27T10:00:00Z' },
+        MockPhotos.mockClear(); // Clear constructor calls
+        
+        // Re-create a mock instance for each test to ensure clean state
+        // This ensures photosInstance is always defined with the mock methods
+        photosInstance = {
+            mediaItems: {
+                list: jest.fn(),
+            },
         };
-        mockMediaItemsList.mockResolvedValue({ data: { mediaItems: [mockItem] } });
+        // Make the mock constructor return this specific instance
+        MockPhotos.mockImplementation(() => photosInstance);
+    });
 
-        const latestItem = await getLatestMediaItem(mockAuthClient, mockLogger);
+    describe('getLatestMediaItem', () => {
+        test('should return the latest item successfully', async () => {
+            const mockItem = {
+                id: 'test-id',
+                filename: 'latest.jpg',
+                mediaMetadata: { creationTime: '2023-10-27T10:00:00Z' },
+            };
+            // Ensure the mock returns the expected structure
+            photosInstance.mediaItems.list.mockResolvedValue({ mediaItems: [mockItem], nextPageToken: null });
 
-        expect(latestItem).toEqual(mockItem);
-        expect(google.photoslibrary).toHaveBeenCalledWith('v1');
-        expect(mockMediaItemsList).toHaveBeenCalledWith({
-            pageSize: 1,
-            auth: mockAuthClient,
+            const latestItem = await getLatestMediaItem(mockAccessToken, mockLogger);
+
+            expect(latestItem).toEqual(mockItem);
+            expect(MockPhotos).toHaveBeenCalledWith(mockAccessToken);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(1); 
+            expect(mockLogger.debug).toHaveBeenCalledWith('Attempting to fetch the latest media item using googlephotos library...');
+            expect(mockLogger.debug).toHaveBeenCalledWith('Successfully fetched the latest media item via googlephotos.');
         });
-        expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining('Attempting to fetch'));
-        expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining('Successfully fetched'));
+
+        test('should return null if no items are found', async () => {
+             photosInstance.mediaItems.list.mockResolvedValue({ mediaItems: [], nextPageToken: null });
+
+            const latestItem = await getLatestMediaItem(mockAccessToken, mockLogger);
+
+            expect(latestItem).toBeNull();
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(1);
+            expect(mockLogger.info).toHaveBeenCalledWith('No media items found in the Google Photos library via googlephotos.');
+        });
+        
+         test('should return null if response is missing mediaItems', async () => {
+             // Simulate library potentially returning undefined or null for mediaItems
+             photosInstance.mediaItems.list.mockResolvedValue({ nextPageToken: null });
+
+            const latestItem = await getLatestMediaItem(mockAccessToken, mockLogger);
+
+            expect(latestItem).toBeNull();
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(1);
+            expect(mockLogger.info).toHaveBeenCalledWith('No media items found in the Google Photos library via googlephotos.');
+        });
+
+        test('should return null and log error on API failure', async () => {
+            const apiError = new Error('API Call Failed');
+            photosInstance.mediaItems.list.mockRejectedValue(apiError);
+
+            const latestItem = await getLatestMediaItem(mockAccessToken, mockLogger);
+
+            expect(latestItem).toBeNull();
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(1);
+            expect(mockLogger.error).toHaveBeenCalledWith(`Error fetching latest media item via googlephotos: ${apiError.message}`);
+        });
     });
 
-    test('getLatestMediaItem should return null if no items are found', async () => {
-        mockMediaItemsList.mockResolvedValue({ data: { mediaItems: [] } }); // Empty array
+    describe('getAllMediaItems', () => {
+        test('should fetch all items across multiple pages', async () => {
+            const item1 = { id: 'id1', filename: 'file1.jpg' };
+            const item2 = { id: 'id2', filename: 'file2.jpg' };
+            const item3 = { id: 'id3', filename: 'file3.jpg' };
+            
+            photosInstance.mediaItems.list
+                .mockResolvedValueOnce({ mediaItems: [item1, item2], nextPageToken: 'token1' })
+                .mockResolvedValueOnce({ mediaItems: [item3], nextPageToken: null });
 
-        const latestItem = await getLatestMediaItem(mockAuthClient, mockLogger);
+            const allItems = await getAllMediaItems(mockAccessToken, mockLogger);
 
-        expect(latestItem).toBeNull();
-        expect(mockMediaItemsList).toHaveBeenCalledWith({ pageSize: 1, auth: mockAuthClient });
-        expect(mockLogger.info).toHaveBeenCalledWith('No media items found in the Google Photos library.');
-    });
+            expect(MockPhotos).toHaveBeenCalledWith(mockAccessToken);
+            expect(allItems).toEqual([item1, item2, item3]);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(2);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, null);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, 'token1');
+            expect(mockLogger.info).toHaveBeenCalledWith('Starting to fetch all media items using googlephotos library...');
+            expect(mockLogger.info).toHaveBeenCalledWith('Fetched 2 items on page 1.');
+            expect(mockLogger.info).toHaveBeenCalledWith('Fetched 1 items on page 2.');
+            expect(mockLogger.info).toHaveBeenCalledWith('Finished fetching media items. Total items found: 3');
+        });
 
-    test('getLatestMediaItem should return null if API response has no mediaItems property', async () => {
-        mockMediaItemsList.mockResolvedValue({ data: {} }); // No mediaItems property
+        test('should return empty array if library is empty', async () => {
+            photosInstance.mediaItems.list.mockResolvedValue({ mediaItems: [], nextPageToken: null });
 
-        const latestItem = await getLatestMediaItem(mockAuthClient, mockLogger);
+            const allItems = await getAllMediaItems(mockAccessToken, mockLogger);
 
-        expect(latestItem).toBeNull();
-        expect(mockMediaItemsList).toHaveBeenCalledWith({ pageSize: 1, auth: mockAuthClient });
-        expect(mockLogger.info).toHaveBeenCalledWith('No media items found in the Google Photos library.');
-    });
+            expect(allItems).toEqual([]);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(1);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, null);
+            expect(mockLogger.info).toHaveBeenCalledWith('No items found on page 1.');
+            expect(mockLogger.info).toHaveBeenCalledWith('Finished fetching media items. Total items found: 0');
+        });
 
-    test('getLatestMediaItem should return null and log error on API failure', async () => {
-        const apiError = new Error('API Error');
-        mockMediaItemsList.mockRejectedValue(apiError);
+        test('should throw error on critical API failure during pagination', async () => {
+             const item1 = { id: 'id1', filename: 'file1.jpg' };
+             const apiError = new Error('Rate Limit Exceeded');
+             
+            photosInstance.mediaItems.list
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'token1' })
+                .mockRejectedValueOnce(apiError);
 
-        const latestItem = await getLatestMediaItem(mockAuthClient, mockLogger);
+            await expect(getAllMediaItems(mockAccessToken, mockLogger))
+                .rejects.toThrow(`Failed to fetch all media items: ${apiError.message}`);
 
-        expect(latestItem).toBeNull();
-        expect(mockMediaItemsList).toHaveBeenCalledWith({ pageSize: 1, auth: mockAuthClient });
-        expect(mockLogger.error).toHaveBeenCalledWith(`Error fetching latest media item from Google Photos API: ${apiError.message}`);
-    });
-
-    test('getLatestMediaItem should log detailed API error if available', async () => {
-        const apiError = new Error('Permission Denied');
-        apiError.response = { data: { error: { code: 403, message: 'Forbidden' } } };
-        mockMediaItemsList.mockRejectedValue(apiError);
-
-        await getLatestMediaItem(mockAuthClient, mockLogger);
-
-        expect(mockLogger.error).toHaveBeenCalledWith(`Error fetching latest media item from Google Photos API: ${apiError.message}`);
-        expect(mockLogger.error).toHaveBeenCalledWith('API Error Details:', apiError.response.data.error);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(2);
+             expect(mockLogger.error).toHaveBeenCalledWith(`Error fetching media items (page 2) via googlephotos: ${apiError.message}`);
+        });
     });
 }); 

@@ -89,66 +89,96 @@ function getCodeFromTerminal() {
  * @param {string} clientSecretsPath Path to the client_secret.json file.
  * @param {string} tokenPath Path to store/load the token file.
  * @param {winston.Logger} logger The logger instance.
- * @returns {Promise<OAuth2Client>} An authorized OAuth2 client.
+ * @returns {Promise<{client: OAuth2Client, accessToken: string}|null>} An object containing the authorized client and the access token, or null on failure.
  */
 async function authorize(clientSecretsPath, tokenPath, logger) {
     logger.info('Attempting to authorize Google Photos API access...');
-    let client = await loadTokenIfExists(tokenPath, logger);
-    if (client) {
-        logger.info('Successfully loaded existing token.');
-        // TODO: Add check for token expiry and refresh if needed (googleapis might handle this automatically)
-        return client;
-    }
-
-    // If no valid token, start the OAuth flow
-    logger.info('No valid token found, starting new authorization flow.');
-    let secretsContent;
     try {
-        secretsContent = await fs.readFile(clientSecretsPath);
-    } catch (err) {
-        logger.error(`Error loading client secret file from ${clientSecretsPath}:`, err);
-        logger.error('Please ensure you have downloaded your OAuth 2.0 Client credentials (client_secret.json) from the Google Cloud Console and placed it correctly.');
-        throw new Error(`Missing or unreadable client secret file: ${clientSecretsPath}`);
-    }
+        let client = await loadTokenIfExists(tokenPath, logger);
+        if (client) {
+            logger.info('Successfully loaded existing token.');
+            // Ensure credentials (like access_token) are available
+            // google-auth-library might refresh automatically, but let's try to get it
+             try {
+                 const tokenInfo = await client.getAccessToken();
+                 if (!tokenInfo || !tokenInfo.token) {
+                     logger.warn('Could not retrieve access token from loaded client, attempting refresh flow.');
+                     // Force refresh flow by setting client to null
+                     client = null; 
+                 } else {
+                     logger.debug('Access token retrieved successfully from existing client.');
+                     return { client, accessToken: tokenInfo.token };
+                 }
+             } catch (refreshError) {
+                 logger.warn(`Failed to get/refresh access token from loaded client: ${refreshError.message}. Proceeding with new authorization flow.`);
+                 client = null; // Force refresh flow
+             }
+        }
 
-    const keys = JSON.parse(secretsContent);
-    const key = keys.installed || keys.web; // Support both types
-     if (!key) {
-         throw new Error('Invalid client secret file format: Missing "installed" or "web" key.');
-     }
+        // If no valid token or refresh failed, start the OAuth flow
+        logger.info('No valid token found or refresh failed, starting new authorization flow.');
+        let secretsContent;
+        try {
+            secretsContent = await fs.readFile(clientSecretsPath);
+        } catch (err) {
+            logger.error(`Error loading client secret file from ${clientSecretsPath}:`, err);
+            logger.error('Please ensure you have downloaded your OAuth 2.0 Client credentials (client_secret.json) from the Google Cloud Console and placed it correctly.');
+            throw new Error(`Missing or unreadable client secret file: ${clientSecretsPath}`);
+        }
 
-    const oAuth2Client = new google.auth.OAuth2(
-        key.client_id,
-        key.client_secret,
-        key.redirect_uris ? key.redirect_uris[0] : 'urn:ietf:wg:oauth:2.0:oob' // Use OOB for non-web apps if no redirect URI specified
-    );
+        const keys = JSON.parse(secretsContent);
+        const key = keys.installed || keys.web; // Support both types
+         if (!key) {
+             throw new Error('Invalid client secret file format: Missing "installed" or "web" key.');
+         }
 
-    const authUrl = oAuth2Client.generateAuthUrl({
-        access_type: 'offline', // Request refresh token
-        scope: SCOPES,
-        prompt: 'consent', // Ensure user sees consent screen even if previously authorized
-    });
+        const oAuth2Client = new google.auth.OAuth2(
+            key.client_id,
+            key.client_secret,
+            key.redirect_uris ? key.redirect_uris[0] : 'urn:ietf:wg:oauth:2.0:oob' // Use OOB for non-web apps if no redirect URI specified
+        );
 
-    logger.info(`Authorize this app by visiting this url: ${authUrl}`);
-    try {
-        await open(authUrl);
-        logger.info('Opened authorization URL in your default browser.');
-    } catch (err) {
-        logger.warn(`Failed to automatically open browser: ${err.message}. Please open the URL manually.`);
-    }
+        const authUrl = oAuth2Client.generateAuthUrl({
+            access_type: 'offline', // Request refresh token
+            scope: SCOPES,
+            prompt: 'consent', // Ensure user sees consent screen even if previously authorized
+        });
 
-    const code = await getCodeFromTerminal();
-    logger.info(`Received authorization code.`);
+        logger.info(`Authorize this app by visiting this url: ${authUrl}`);
+        try {
+            await open(authUrl);
+            logger.info('Opened authorization URL in your default browser.');
+        } catch (err) {
+            logger.warn(`Failed to automatically open browser: ${err.message}. Please open the URL manually.`);
+        }
 
-    try {
-        const { tokens } = await oAuth2Client.getToken(code);
-        oAuth2Client.setCredentials(tokens);
+        const code = await getCodeFromTerminal();
+        logger.info(`Received authorization code.`);
+
+        // Rename the existing oAuth2Client variable for clarity
+        const newOAuth2Client = oAuth2Client; 
+
+        const { tokens } = await newOAuth2Client.getToken(code);
+        newOAuth2Client.setCredentials(tokens);
         logger.info('Successfully exchanged code for tokens.');
-        await saveToken(tokenPath, oAuth2Client, logger);
-        return oAuth2Client;
+        
+        // Ensure we have an access token after exchange
+        if (!tokens.access_token) {
+            logger.error('Failed to obtain access_token after code exchange.');
+            throw new Error('Access token missing in returned tokens.');
+        }
+        
+        await saveToken(tokenPath, newOAuth2Client, logger);
+        return { client: newOAuth2Client, accessToken: tokens.access_token };
+
     } catch (err) {
-        logger.error('Error retrieving or saving access token:', err);
-        throw new Error(`Failed to get or save token: ${err.message}`);
+        // Catch errors from the entire process
+        logger.error('Authorization process failed:', err.message);
+        // Log specific known errors again for clarity if helpful
+        if (err.message.includes('client secret file')) {
+             logger.error('Please ensure you have downloaded your OAuth 2.0 Client credentials (client_secret.json) from the Google Cloud Console and placed it correctly.');
+        }
+        return null; // Indicate failure
     }
 }
 

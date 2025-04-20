@@ -1,7 +1,7 @@
 {
   "localSyncDirectory": "./gphotos_backup",
   "syncIntervalHours": 6,
-  "credentialsPath": "./google_credentials.json",
+  "credentialsPath": "./client_credentials.json",
   "logFilePath": "./gphotos_sync.log",
   "stateFilePath": "./sync_state.json"
 } 
