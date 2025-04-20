@@ -48,7 +48,13 @@ const logger = winston.createLogger({
 
 logger.info("Starting google-synchroniser...");
 logger.info(`Using configuration file: ${configPath}`);
-// logger.debug("Loaded configuration:", config); // Use debug level for verbose output
+// Log if debug modes are active
+if (config.debugMaxPages && config.debugMaxPages > 0) {
+    logger.warn(`*** Debug mode enabled: Max ${config.debugMaxPages} pages will be fetched for initial sync. ***`);
+}
+if (config.debugMaxDownloads && config.debugMaxDownloads > 0) {
+    logger.warn(`*** Debug mode enabled: Max ${config.debugMaxDownloads} downloads will be attempted per run. ***`);
+}
 
 // --- Main Application Logic ---
 
@@ -126,13 +132,14 @@ async function main() {
             syncSuccess = false;
         }
     } else {
-        // Run Incremental Sync (pass config for directory path)
+        // Run Incremental Sync
         logger.info(`Incremental sync needed (Last sync: ${lastSyncTime}).`);
         try {
+            // Pass the full config object
             const incrementalSyncResult = await runIncrementalSync(
                 lastSyncTime, 
                 accessToken, 
-                config.localSyncDirectory, // Pass only the needed path 
+                config, // Pass full config 
                 logger
             );
             syncSuccess = incrementalSyncResult.success;

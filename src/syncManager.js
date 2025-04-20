@@ -4,7 +4,7 @@ const { ensureDirectoryExists, downloadMediaItem } = require('./downloader');
 
 /**
  * Performs the initial synchronization.
- * Fetches albums and media items, respecting debugMaxPages from config.
+ * Fetches albums and media items, respecting debug limits.
  * @param {string} accessToken - The Google OAuth2 access token.
  * @param {object} config - The loaded application configuration object.
  * @param {winston.Logger} logger - Logger instance.
@@ -12,28 +12,36 @@ const { ensureDirectoryExists, downloadMediaItem } = require('./downloader');
  */
 async function runInitialSync(accessToken, config, logger) {
     const localDirectory = config.localSyncDirectory;
-    const maxPages = config.debugMaxPages || 0; // Use 0 if null/undefined/false
+    const maxPages = config.debugMaxPages || 0;
+    const maxDownloads = config.debugMaxDownloads || 0; // Get download limit
+    let downloadsDone = 0; // Counter for downloads
+    
     logger.info('Starting initial synchronization (including albums)...');
     if (maxPages > 0) {
         logger.warn(`*** DEBUG MODE ACTIVE: Fetching max ${maxPages} pages for albums and media items ***`);
     }
+    if (maxDownloads > 0) {
+         logger.warn(`*** DEBUG MODE ACTIVE: Max ${maxDownloads} downloads will be attempted ***`);
+    }
+    
     let albumsProcessed = 0;
-    let itemsProcessed = 0; // Total items encountered (album + main library)
-    let itemsDownloaded = 0; // Includes skipped existing files
+    let itemsProcessed = 0; 
+    let itemsDownloaded = 0; 
     let itemsFailed = 0;
-    const downloadedIds = new Set(); // Track IDs downloaded via albums
+    const downloadedIds = new Set();
+    let downloadLimitReached = false; // Flag to break outer loops
 
     try {
         // 1. Ensure the root directory exists
         await ensureDirectoryExists(localDirectory, logger);
 
-        // 2. Process Albums (pass maxPages)
+        // 2. Process Albums
         logger.info('--- Processing Albums ---');
         const allAlbums = await getAllAlbums(accessToken, logger, maxPages);
         albumsProcessed = allAlbums.length; 
-        // Note: albumsProcessed might be less than total if maxPages was hit
 
         for (const album of allAlbums) {
+            if (downloadLimitReached) break; // Stop processing albums if limit hit
             if (!album.title) {
                 logger.warn(`Album found with no title (ID: ${album.id}), skipping.`);
                 continue;
@@ -46,15 +54,22 @@ async function runInitialSync(accessToken, config, logger) {
             try {
                 await ensureDirectoryExists(albumDirectory, logger);
                 const albumItems = await getAlbumMediaItems(album.id, accessToken, logger, maxPages);
-                itemsProcessed += albumItems.length; // Add to total count
+                itemsProcessed += albumItems.length; 
+                logger.info(`Found ${albumItems.length} items in album "${safeAlbumTitle}"...`);
 
-                logger.info(`Found ${albumItems.length} items in album "${safeAlbumTitle}"` + (maxPages > 0 && albumItems.length >= maxPages * 100 ? ' (Page limit may have been reached)' : '')); // Approx check
                 for (const item of albumItems) {
+                    // Check download limit BEFORE attempting download
+                    if (maxDownloads > 0 && downloadsDone >= maxDownloads) {
+                        logger.warn(`Reached debug download limit (${maxDownloads}). Stopping further downloads.`);
+                        downloadLimitReached = true;
+                        break; // Break inner item loop
+                    }
                     try {
                         const success = await downloadMediaItem(item, albumDirectory, logger);
                         if (success) {
                             itemsDownloaded++;
-                            downloadedIds.add(item.id); // Mark as downloaded
+                            downloadsDone++; // Increment counter only on successful/skipped download
+                            downloadedIds.add(item.id);
                         } else {
                             itemsFailed++;
                             logger.warn(`Failed to process item ${item.id} (${item.filename}) in album "${safeAlbumTitle}"`);
@@ -63,8 +78,6 @@ async function runInitialSync(accessToken, config, logger) {
                         itemsFailed++;
                         logger.error(`Critical error downloading item ${item.id} (${item.filename}) in album "${safeAlbumTitle}": ${downloadError.message}`);
                     }
-                     // Optional delay
-                     // await new Promise(resolve => setTimeout(resolve, 50));
                 }
             } catch (albumError) {
                  logger.error(`Failed to process album "${safeAlbumTitle}" (ID: ${album.id}): ${albumError.message}`);
@@ -73,39 +86,46 @@ async function runInitialSync(accessToken, config, logger) {
         }
         logger.info('--- Finished Processing Albums ---');
 
-        // 3. Process Main Library (pass maxPages)
-        logger.info('--- Processing Main Photo Stream (excluding items already downloaded from albums) ---');
-        const allMainMediaItems = await getAllMediaItems(accessToken, logger, maxPages);
-        let mainStreamItemsAttempted = 0;
+        // 3. Process Main Library 
+        logger.info('--- Processing Main Photo Stream ... ---');
+        if (downloadLimitReached) {
+             logger.warn('Skipping main stream processing due to download limit reached during album processing.');
+        } else {
+            const allMainMediaItems = await getAllMediaItems(accessToken, logger, maxPages);
+            let mainStreamItemsAttempted = 0;
 
-        for (const item of allMainMediaItems) {
-             // Only process if not already downloaded via an album
-            if (!downloadedIds.has(item.id)) {
-                itemsProcessed++; // Count this as a distinct item processed
-                mainStreamItemsAttempted++;
-                try {
-                    // Download to the root directory
-                    const success = await downloadMediaItem(item, localDirectory, logger);
-                    if (success) {
-                        itemsDownloaded++;
-                        // No need to add to downloadedIds here, as we won't check again
-                    } else {
-                        itemsFailed++;
-                        logger.warn(`Failed to process item ${item.id} (${item.filename}) from main stream`);
+            for (const item of allMainMediaItems) {
+                if (downloadLimitReached) break; // Check limit again for main stream
+                if (!downloadedIds.has(item.id)) {
+                    itemsProcessed++; 
+                    mainStreamItemsAttempted++;
+                     // Check download limit BEFORE attempting download
+                    if (maxDownloads > 0 && downloadsDone >= maxDownloads) {
+                        logger.warn(`Reached debug download limit (${maxDownloads}). Stopping further downloads.`);
+                        downloadLimitReached = true;
+                        break; // Break main stream loop
                     }
-                } catch (downloadError) {
-                    itemsFailed++;
-                    logger.error(`Critical error downloading item ${item.id} (${item.filename}) from main stream: ${downloadError.message}`);
+                    try {
+                        const success = await downloadMediaItem(item, localDirectory, logger);
+                        if (success) {
+                            itemsDownloaded++;
+                            downloadsDone++; // Increment counter
+                        } else {
+                            itemsFailed++;
+                            logger.warn(`Failed to process item ${item.id} (${item.filename}) from main stream`);
+                        }
+                    } catch (downloadError) {
+                        itemsFailed++;
+                        logger.error(`Critical error downloading item ${item.id} (${item.filename}) from main stream: ${downloadError.message}`);
+                    }
                 }
-                // Optional delay
-                // await new Promise(resolve => setTimeout(resolve, 50));
             }
+            logger.info(`Finished processing main stream. Items attempted (not in albums): ${mainStreamItemsAttempted}`);
         }
-        logger.info(`Finished processing main stream. Items attempted (not in albums): ${mainStreamItemsAttempted}`);
         logger.info('--- Finished Processing Main Stream ---');
 
         logger.info('Initial synchronization finished.');
-        logger.info(`Summary: Albums Processed (or fetched within page limit): ${albumsProcessed}, Total Items Encountered: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}` + (maxPages > 0 ? ' (Page limit applied)' : ''));
+        logger.info(`Summary: Albums Processed: ${albumsProcessed}, Total Items Encountered: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}` + (maxPages > 0 ? ' (Page limit applied)' : '') + (maxDownloads > 0 && downloadLimitReached ? ' (Download limit reached)' : ''));
         
         return { success: true, albumsProcessed, itemsProcessed, itemsDownloaded, itemsFailed };
 
@@ -123,12 +143,19 @@ async function runInitialSync(accessToken, config, logger) {
  *       ignoring potential new album memberships for simplicity.
  * @param {string} lastSyncTimestamp - ISO 8601 timestamp of the last successful sync.
  * @param {string} accessToken - The Google OAuth2 access token.
- * @param {string} localDirectory - Absolute path to the root local download directory.
+ * @param {object} config - The loaded application configuration object.
  * @param {winston.Logger} logger - Logger instance.
  * @returns {Promise<{success: boolean, itemsProcessed: number, itemsDownloaded: number, itemsFailed: number}>}
  */
-async function runIncrementalSync(lastSyncTimestamp, accessToken, localDirectory, logger) {
+async function runIncrementalSync(lastSyncTimestamp, accessToken, config, logger) {
+    const localDirectory = config.localSyncDirectory;
+    const maxDownloads = config.debugMaxDownloads || 0; // Get download limit
+    let downloadsDone = 0; // Counter
+
     logger.info(`Starting incremental synchronization since ${lastSyncTimestamp}...`);
+     if (maxDownloads > 0) {
+         logger.warn(`*** DEBUG MODE ACTIVE: Max ${maxDownloads} downloads will be attempted ***`);
+    }
     let itemsProcessed = 0;
     let itemsDownloaded = 0;
     let itemsFailed = 0;
@@ -150,11 +177,16 @@ async function runIncrementalSync(lastSyncTimestamp, accessToken, localDirectory
 
         // 3. Download new items
         for (const item of newMediaItems) {
+             // Check download limit BEFORE attempting download
+            if (maxDownloads > 0 && downloadsDone >= maxDownloads) {
+                logger.warn(`Reached debug download limit (${maxDownloads}). Stopping further downloads.`);
+                break; // Break download loop
+            }
             try {
-                 // Download directly to the root directory in this simplified version
                 const success = await downloadMediaItem(item, localDirectory, logger);
                 if (success) {
                     itemsDownloaded++;
+                    downloadsDone++; // Increment counter
                 } else {
                     itemsFailed++;
                     logger.warn(`Failed to process new item ${item.id} (${item.filename})`);
@@ -169,7 +201,7 @@ async function runIncrementalSync(lastSyncTimestamp, accessToken, localDirectory
         }
 
         logger.info('Incremental synchronization finished.');
-        logger.info(`Summary: New Items Found: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}`);
+        logger.info(`Summary: New Items Found: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}` + (maxDownloads > 0 && downloadsDone >= maxDownloads ? ' (Download limit reached)' : ''));
         
         // Consider successful if it ran through all new items without critical API errors
         return { success: true, itemsProcessed, itemsDownloaded, itemsFailed };

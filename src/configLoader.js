@@ -30,7 +30,7 @@ function loadConfig(filePath) {
     console.log("Configuration loaded successfully."); // Still using console here
 
     const requiredKeys = ['localSyncDirectory', 'syncIntervalHours', 'credentialsPath', 'logFilePath', 'stateFilePath'];
-    const optionalKeys = ['debugMaxPages'];
+    const optionalKeys = ['debugMaxPages', 'debugMaxDownloads'];
     
     const missingKeys = requiredKeys.filter(key => !(key in config));
     if (missingKeys.length > 0) {
@@ -45,6 +45,16 @@ function loadConfig(filePath) {
     } else {
         // Ensure it's set to 0 if null or undefined for easier checks later
         config.debugMaxPages = 0;
+    }
+
+    // Validate optional debugMaxDownloads if present
+    if (config.debugMaxDownloads !== undefined && config.debugMaxDownloads !== null) {
+        if (typeof config.debugMaxDownloads !== 'number' || !Number.isInteger(config.debugMaxDownloads) || config.debugMaxDownloads < 0) {
+            throw new Error('Invalid configuration: debugMaxDownloads must be a non-negative integer or null/0.');
+        }
+    } else {
+        // Ensure it's set to 0 if null or undefined for easier checks later
+        config.debugMaxDownloads = 0;
     }
 
     // Resolve relative paths in config to absolute paths based on config file's directory

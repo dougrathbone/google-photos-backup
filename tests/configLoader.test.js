@@ -23,7 +23,8 @@ describe('Config Loader', () => {
         credentialsPath: './creds.json',
         logFilePath: './app.log',
         stateFilePath: './state.json',
-        debugMaxPages: 0 // Default valid value
+        debugMaxPages: 0,
+        debugMaxDownloads: 0 // Add default
     };
 
     beforeEach(() => {
@@ -126,6 +127,40 @@ describe('Config Loader', () => {
              expect(() => {
                  loadConfig(mockConfigPath);
              }).toThrow('Invalid configuration: debugMaxPages must be a non-negative integer');
+        }
+    });
+
+    test('should load config successfully with valid optional debugMaxDownloads', () => {
+        fs.existsSync.mockReturnValue(true);
+        const configWithDebug = { ...baseConfigContent, debugMaxDownloads: 10 };
+        fs.readFileSync.mockReturnValue(JSON.stringify(configWithDebug));
+        const config = loadConfig(mockConfigPath);
+        expect(config.debugMaxDownloads).toBe(10);
+    });
+    
+    test('should default debugMaxDownloads to 0 if null or missing', () => {
+        fs.existsSync.mockReturnValue(true);
+        let configContent = { ...baseConfigContent };
+        delete configContent.debugMaxDownloads; // Test missing
+        fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+        let config = loadConfig(mockConfigPath);
+        expect(config.debugMaxDownloads).toBe(0);
+
+        configContent = { ...baseConfigContent, debugMaxDownloads: null }; // Test null
+        fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+        config = loadConfig(mockConfigPath);
+        expect(config.debugMaxDownloads).toBe(0);
+    });
+
+    test('should throw error if debugMaxDownloads is not a non-negative integer', () => {
+        fs.existsSync.mockReturnValue(true);
+        const invalidValues = [-5, 2.5, 'many', {}];
+        for (const invalidValue of invalidValues) {
+             const configContent = { ...baseConfigContent, debugMaxDownloads: invalidValue };
+             fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+             expect(() => {
+                 loadConfig(mockConfigPath);
+             }).toThrow('Invalid configuration: debugMaxDownloads must be a non-negative integer');
         }
     });
 }); 

@@ -74,7 +74,8 @@ cat > "$CONFIG_PATH" << EOL
   "credentialsPath": "$CONFIG_DIR/$CREDENTIALS_FILE_NAME",
   "logFilePath": "$DATA_DIR/gphotos_sync.log",
   "stateFilePath": "$DATA_DIR/sync_state.json",
-  "debugMaxPages": 0
+  "debugMaxPages": 0,
+  "debugMaxDownloads": 0
 }
 EOL
 echo_green "Default configuration created."

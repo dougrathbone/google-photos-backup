@@ -64,7 +64,8 @@ Follow these steps to set up your local development environment:
         *   `credentialsPath`: Path to your downloaded **client secret** file (default: `./client_secret.json`). **Make sure this matches the file you downloaded and renamed in the previous step.**
         *   `logFilePath`: Path for the application log file (default: `./gphotos_sync.log`).
         *   `stateFilePath`: Path for the file that will store synchronization state (default: `./sync_state.json`).
-        *   `debugMaxPages` (Optional): Set to an integer greater than 0 to limit the number of pages fetched for albums and media items during the *initial sync*. Useful for debugging or testing without fetching the entire library. Defaults to `0` (no limit).
+        *   `debugMaxPages` (Optional): Set to an integer > 0 to limit pages fetched during *initial sync*. Defaults to `0` (no limit).
+        *   `debugMaxDownloads` (Optional): Set to an integer > 0 to limit the total number of files downloaded per run (initial or incremental). Useful for testing without downloading everything. Defaults to `0` (no limit).
     *   The application automatically resolves these paths relative to the project root.
 
 ## Running the Application

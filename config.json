@@ -4,5 +4,6 @@
   "credentialsPath": "./client_credentials.json",
   "logFilePath": "./gphotos_sync.log",
   "stateFilePath": "./sync_state.json",
-  "debugMaxPages": 0
+  "debugMaxPages": 0,
+  "debugMaxDownloads": 0
 } 
