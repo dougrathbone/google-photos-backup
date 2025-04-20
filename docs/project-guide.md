@@ -43,6 +43,7 @@ This document outlines the requirements for a new Linux application, `gphotos-sy
     * **Initial Sync:** On the first run (or when the state file is missing), scan the entire Google Photos library (respecting API limits) and download all media items.
     * **Incremental Sync:** On subsequent runs, query the Google Photos API for media added since the last successful sync timestamp and download only those new items.
     * Must handle potential API pagination.
+    * Downloads should retrieve the original, unmodified media bytes whenever possible (including RAW image formats). Videos should be downloaded at original quality.
 * **State Management (`state.json`):**
     * Must store the timestamp of the last successful synchronization check.
     * Must store identifiers of successfully downloaded media items to prevent duplicates and potentially aid recovery (though the primary mechanism for incremental sync should be the timestamp).
@@ -69,6 +70,7 @@ This document outlines the requirements for a new Linux application, `gphotos-sy
 * **Security:** API credentials (OAuth tokens) must be stored securely (e.g., with restricted file permissions, potentially outside the main config file). Avoid logging sensitive information.
 * **Maintainability:** Code should be well-structured, commented where necessary, and follow Node.js best practices.
 * **Testability:** All core logic (configuration, authentication, state management, API interaction, synchronization) should be unit tested using Jest. New features or significant refactors must include corresponding unit tests. All tests must pass before moving to the next development step.
+* **API Limitations:** Be aware that the Google Photos Library API may have limitations regarding the download of original quality files (especially RAW photos and unmodified videos). The application should download the best available version via the API, but it might not always be the true original file uploaded by the user.
 
 **6. Technology Stack**
 

@@ -93,4 +93,111 @@ async function getAllMediaItems(accessToken, logger) {
     }
 }
 
-module.exports = { getLatestMediaItem, getAllMediaItems }; 
+/**
+ * Fetches all albums from the user's Google Photos library.
+ * Handles pagination automatically.
+ * @param {string} accessToken - The Google OAuth2 access token.
+ * @param {winston.Logger} logger - The logger instance.
+ * @returns {Promise<Array<object>>} A list of all album objects.
+ * @throws {Error} If a critical API error occurs.
+ */
+async function getAllAlbums(accessToken, logger) {
+    logger.info('Starting to fetch all albums...');
+    const photos = new Photos(accessToken);
+    const albums = [];
+    let pageToken = null;
+    let pageCount = 0;
+    const pageSize = 50; // Max page size for albums
+
+    try {
+        do {
+            pageCount++;
+            logger.debug(`Fetching page ${pageCount} of albums...`);
+            // Assuming the albums.list method takes pageSize and pageToken
+            // This might need adjustment based on actual library behavior.
+            const response = await photos.albums.list(pageSize, pageToken);
+
+            const items = response.albums;
+            if (items && items.length > 0) {
+                logger.info(`Fetched ${items.length} albums on page ${pageCount}.`);
+                albums.push(...items);
+            } else {
+                logger.info(`No albums found on page ${pageCount}.`);
+                if (!response.nextPageToken) break;
+            }
+
+            pageToken = response.nextPageToken;
+            if (pageToken) {
+                logger.debug(`Next page token received for albums, continuing fetch...`);
+            }
+
+        } while (pageToken);
+
+        logger.info(`Finished fetching albums. Total albums found: ${albums.length}`);
+        return albums;
+
+    } catch (err) {
+        logger.error(`Error fetching albums (page ${pageCount}) via googlephotos: ${err.message || err}`);
+         if (err.response?.data) {
+            logger.error('API Error Details:', err.response.data);
+        }
+        // NOTE: This call might fail due to API policy changes if using restricted scopes
+        throw new Error(`Failed to fetch all albums: ${err.message || err}`);
+    }
+}
+
+/**
+ * Searches for media items within a specific album.
+ * Handles pagination automatically.
+ * @param {string} albumId - The ID of the album to search within.
+ * @param {string} accessToken - The Google OAuth2 access token.
+ * @param {winston.Logger} logger - The logger instance.
+ * @returns {Promise<Array<object>>} A list of all media item objects in the album.
+ * @throws {Error} If a critical API error occurs.
+ */
+async function getAlbumMediaItems(albumId, accessToken, logger) {
+    logger.info(`Starting to fetch media items for album ID: ${albumId}...`);
+    const photos = new Photos(accessToken);
+    const mediaItems = [];
+    let pageToken = null;
+    let pageCount = 0;
+    const pageSize = 100; // Max page size for search
+
+    try {
+        do {
+            pageCount++;
+            logger.debug(`Fetching page ${pageCount} of media items for album ${albumId}...`);
+            // Assuming the mediaItems.search method takes an albumId or filter object
+            // This might need adjustment based on actual library behavior.
+            const response = await photos.mediaItems.search(albumId, pageSize, pageToken);
+
+            const items = response.mediaItems;
+            if (items && items.length > 0) {
+                logger.info(`Fetched ${items.length} items on page ${pageCount} for album ${albumId}.`);
+                mediaItems.push(...items);
+            } else {
+                logger.info(`No items found on page ${pageCount} for album ${albumId}.`);
+                 if (!response.nextPageToken) break;
+            }
+
+            pageToken = response.nextPageToken;
+            if (pageToken) {
+                logger.debug(`Next page token received for album items, continuing fetch...`);
+            }
+
+        } while (pageToken);
+
+        logger.info(`Finished fetching items for album ${albumId}. Total items found: ${mediaItems.length}`);
+        return mediaItems;
+
+    } catch (err) {
+        logger.error(`Error searching media items for album ${albumId} (page ${pageCount}) via googlephotos: ${err.message || err}`);
+         if (err.response?.data) {
+            logger.error('API Error Details:', err.response.data);
+        }
+        // NOTE: This call might fail due to API policy changes if using restricted scopes
+        throw new Error(`Failed to fetch items for album ${albumId}: ${err.message || err}`);
+    }
+}
+
+module.exports = { getLatestMediaItem, getAllMediaItems, getAllAlbums, getAlbumMediaItems }; 

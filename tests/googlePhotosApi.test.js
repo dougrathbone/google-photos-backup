@@ -1,17 +1,22 @@
 const Photos = require('googlephotos');
-const { getLatestMediaItem, getAllMediaItems } = require('../src/googlePhotosApi');
+const { 
+    getLatestMediaItem, 
+    getAllMediaItems, 
+    getAllAlbums, 
+    getAlbumMediaItems 
+} = require('../src/googlePhotosApi');
 
 // Mock the googlephotos library
 jest.mock('googlephotos', () => {
-    // Mock the constructor
     return jest.fn().mockImplementation((token) => {
-        // Mock the instance methods we use
         return {
             mediaItems: {
-                list: jest.fn(), // Mock the list method
-                // search: jest.fn() // Mock search if we used it
+                list: jest.fn(),
+                search: jest.fn(), // Add mock for search
             },
-            // Add mocks for other top-level methods if needed (e.g., albums.list)
+            albums: { // Add mock for albums
+                list: jest.fn(),
+            }
         };
     });
 });
@@ -27,22 +32,21 @@ const mockLogger = {
 const mockAccessToken = 'test-access-token';
 
 describe('Google Photos API (using googlephotos library)', () => {
-    // Get the mock constructor itself
     const MockPhotos = Photos; 
     let photosInstance;
 
     beforeEach(() => {
         jest.clearAllMocks();
-        MockPhotos.mockClear(); // Clear constructor calls
-        
-        // Re-create a mock instance for each test to ensure clean state
-        // This ensures photosInstance is always defined with the mock methods
+        MockPhotos.mockClear();
         photosInstance = {
             mediaItems: {
                 list: jest.fn(),
+                search: jest.fn(),
             },
+            albums: {
+                list: jest.fn(),
+            }
         };
-        // Make the mock constructor return this specific instance
         MockPhotos.mockImplementation(() => photosInstance);
     });
 
@@ -166,6 +170,72 @@ describe('Google Photos API (using googlephotos library)', () => {
 
             expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(2);
              expect(mockLogger.error).toHaveBeenCalledWith(`Error fetching media items (page 2) via googlephotos: ${apiError.message}`);
+        });
+    });
+
+    describe('getAllAlbums', () => {
+        test('should fetch all albums across multiple pages', async () => {
+            const album1 = { id: 'album1', title: 'Trip' };
+            const album2 = { id: 'album2', title: 'Pets' };
+            photosInstance.albums.list
+                .mockResolvedValueOnce({ albums: [album1], nextPageToken: 'tokenA' })
+                .mockResolvedValueOnce({ albums: [album2], nextPageToken: null });
+
+            const allAlbums = await getAllAlbums(mockAccessToken, mockLogger);
+
+            expect(MockPhotos).toHaveBeenCalledWith(mockAccessToken);
+            expect(allAlbums).toEqual([album1, album2]);
+            expect(photosInstance.albums.list).toHaveBeenCalledTimes(2);
+            expect(photosInstance.albums.list).toHaveBeenCalledWith(50, null); // Default page size
+            expect(photosInstance.albums.list).toHaveBeenCalledWith(50, 'tokenA');
+        });
+        
+        test('should return empty array if no albums', async () => {
+            photosInstance.albums.list.mockResolvedValue({ albums: [], nextPageToken: null });
+            const allAlbums = await getAllAlbums(mockAccessToken, mockLogger);
+            expect(allAlbums).toEqual([]);
+            expect(photosInstance.albums.list).toHaveBeenCalledTimes(1);
+        });
+
+        test('should throw error on API failure', async () => {
+            const apiError = new Error('Albums API Failed');
+            photosInstance.albums.list.mockRejectedValue(apiError);
+            await expect(getAllAlbums(mockAccessToken, mockLogger))
+                .rejects.toThrow(`Failed to fetch all albums: ${apiError.message}`);
+        });
+    });
+    
+    describe('getAlbumMediaItems', () => {
+        const albumId = 'test-album-id';
+        test('should search for items in an album across pages', async () => {
+            const item1 = { id: 'idA', filename: 'fileA.jpg' };
+            const item2 = { id: 'idB', filename: 'fileB.jpg' };
+            photosInstance.mediaItems.search
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'tokenM' })
+                .mockResolvedValueOnce({ mediaItems: [item2], nextPageToken: null });
+
+            const albumItems = await getAlbumMediaItems(albumId, mockAccessToken, mockLogger);
+
+            expect(MockPhotos).toHaveBeenCalledWith(mockAccessToken);
+            expect(albumItems).toEqual([item1, item2]);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledTimes(2);
+            // Assuming library takes albumId, pageSize, pageToken
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledWith(albumId, 100, null); 
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledWith(albumId, 100, 'tokenM');
+        });
+        
+        test('should return empty array if album is empty', async () => {
+            photosInstance.mediaItems.search.mockResolvedValue({ mediaItems: [], nextPageToken: null });
+            const albumItems = await getAlbumMediaItems(albumId, mockAccessToken, mockLogger);
+            expect(albumItems).toEqual([]);
+            expect(photosInstance.mediaItems.search).toHaveBeenCalledTimes(1);
+        });
+
+        test('should throw error on API failure', async () => {
+            const apiError = new Error('Search API Failed');
+            photosInstance.mediaItems.search.mockRejectedValue(apiError);
+            await expect(getAlbumMediaItems(albumId, mockAccessToken, mockLogger))
+                .rejects.toThrow(`Failed to fetch items for album ${albumId}: ${apiError.message}`);
         });
     });
 }); 
