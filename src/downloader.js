@@ -1,4 +1,5 @@
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsPromises = fs.promises;
 const path = require('path');
 const axios = require('axios');
 
@@ -9,7 +10,7 @@ const axios = require('axios');
  */
 async function ensureDirectoryExists(dirPath, logger) {
     try {
-        await fs.mkdir(dirPath, { recursive: true });
+        await fsPromises.mkdir(dirPath, { recursive: true });
         logger.debug(`Ensured directory exists: ${dirPath}`);
     } catch (err) {
         logger.error(`Failed to create or access directory ${dirPath}: ${err.message}`);
@@ -38,9 +39,10 @@ function generateUniqueFilename(originalFilename, mediaId) {
  * @param {object} mediaItem - The media item object from Google Photos API.
  * @param {string} localDirectory - The absolute path to the local directory.
  * @param {winston.Logger} logger - The logger instance.
+ * @param {function} unlinkFn - Function to use for unlinking files (defaults to fs.promises.unlink).
  * @returns {Promise<boolean>} True if download was successful, false otherwise.
  */
-async function downloadMediaItem(mediaItem, localDirectory, logger) {
+async function downloadMediaItem(mediaItem, localDirectory, logger, unlinkFn = fsPromises.unlink) {
     if (!mediaItem.baseUrl) {
         logger.warn(`Media item ${mediaItem.id} (${mediaItem.filename}) has no baseUrl, cannot download.`);
         return false;
@@ -55,7 +57,7 @@ async function downloadMediaItem(mediaItem, localDirectory, logger) {
 
     // Check if file already exists (simple check, could be more robust)
     try {
-        await fs.access(localFilePath);
+        await fsPromises.access(localFilePath);
         logger.info(`File already exists, skipping download: ${uniqueFilename}`);
         return true; // Consider existing file as success for initial sync
     } catch (err) {
@@ -75,7 +77,7 @@ async function downloadMediaItem(mediaItem, localDirectory, logger) {
             responseType: 'stream',
         });
 
-        const writer = require('fs').createWriteStream(localFilePath);
+        const writer = fs.createWriteStream(localFilePath);
 
         response.data.pipe(writer);
 
@@ -86,17 +88,14 @@ async function downloadMediaItem(mediaItem, localDirectory, logger) {
             });
             writer.on('error', (err) => {
                 logger.error(`Error writing file ${uniqueFilename}: ${err.message}`);
-                // Attempt to clean up partially written file
-                fs.unlink(localFilePath).catch(unlinkErr => logger.error(`Failed to delete partial file ${localFilePath}: ${unlinkErr.message}`));
-                reject(err); // Reject promise on writer error
+                unlinkFn(localFilePath);
+                reject(err);
             });
             response.data.on('error', (err) => {
-                // Handle stream errors (e.g., network issues during download)
-                 logger.error(`Error during download stream for ${uniqueFilename}: ${err.message}`);
-                 writer.close(); // Ensure writer is closed on stream error
-                 // Attempt cleanup
-                 fs.unlink(localFilePath).catch(unlinkErr => logger.error(`Failed to delete partial file ${localFilePath}: ${unlinkErr.message}`));
-                 reject(err); // Reject promise on stream error
+                logger.error(`Error during download stream for ${uniqueFilename}: ${err.message}`);
+                writer.close();
+                unlinkFn(localFilePath);
+                reject(err);
             });
         });
 

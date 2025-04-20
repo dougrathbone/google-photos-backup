@@ -17,7 +17,8 @@
 - [x] Add unit tests for `configLoader`, `fileUtils`, `googlePhotosApi`, `googleAuth`.
 - [x] Implement State Management (`state.json` loading/saving) (`src/stateManager.js`).
 - [x] Add unit tests for `stateManager`.
-- [ ] Implement Initial Sync Logic
+- [x] Implement Initial Sync Logic (`src/syncManager.js`, `src/downloader.js`).
+- [x] Add unit tests for `downloader`, `syncManager`, and `getAllMediaItems`.
 - [ ] Implement Incremental Sync Logic
 - [ ] Develop `installer.sh` script
 - [ ] Create `systemd` service file

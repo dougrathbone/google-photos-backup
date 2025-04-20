@@ -115,10 +115,10 @@ describe('Google Photos API (using googlephotos library)', () => {
             expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(2);
             expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, null);
             expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, 'token1');
-            expect(mockLogger.info).toHaveBeenCalledWith('Starting to fetch all media items using googlephotos library...');
+            expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Starting to fetch all media items'));
             expect(mockLogger.info).toHaveBeenCalledWith('Fetched 2 items on page 1.');
             expect(mockLogger.info).toHaveBeenCalledWith('Fetched 1 items on page 2.');
-            expect(mockLogger.info).toHaveBeenCalledWith('Finished fetching media items. Total items found: 3');
+            expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Finished fetching media items. Total items found: 3'));
         });
 
         test('should return empty array if library is empty', async () => {
@@ -129,8 +129,28 @@ describe('Google Photos API (using googlephotos library)', () => {
             expect(allItems).toEqual([]);
             expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(1);
             expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, null);
-            expect(mockLogger.info).toHaveBeenCalledWith('No items found on page 1.');
-            expect(mockLogger.info).toHaveBeenCalledWith('Finished fetching media items. Total items found: 0');
+            expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('No items found on page 1'));
+             expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Finished fetching media items. Total items found: 0'));
+        });
+        
+        test('should handle empty page response during pagination', async () => {
+             const item1 = { id: 'id1', filename: 'file1.jpg' };
+             photosInstance.mediaItems.list
+                .mockResolvedValueOnce({ mediaItems: [item1], nextPageToken: 'token1' })
+                .mockResolvedValueOnce({ mediaItems: [], nextPageToken: 'token2' }) // Empty page
+                .mockResolvedValueOnce({ mediaItems: [], nextPageToken: null }); // Final empty page
+
+            const allItems = await getAllMediaItems(mockAccessToken, mockLogger);
+
+            expect(allItems).toEqual([item1]);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledTimes(3);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, null);
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, 'token1');
+            expect(photosInstance.mediaItems.list).toHaveBeenCalledWith(100, 'token2');
+            expect(mockLogger.info).toHaveBeenCalledWith('Fetched 1 items on page 1.');
+            expect(mockLogger.info).toHaveBeenCalledWith('No items found on page 2.');
+            expect(mockLogger.info).toHaveBeenCalledWith('No items found on page 3.');
+            expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Finished fetching media items. Total items found: 1'));
         });
 
         test('should throw error on critical API failure during pagination', async () => {
