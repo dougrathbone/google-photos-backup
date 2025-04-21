@@ -72,8 +72,10 @@ cp -v ./package.json "$INSTALL_DIR/"
 # Copy lock file only if it exists in the source repo (unlikely but possible)
 [ -f ./package-lock.json ] && cp -v ./package-lock.json "$INSTALL_DIR/" || echo_yellow "    package-lock.json not found in source, skipping."
 cp -v ./run.js "$INSTALL_DIR/"
-# Ensure run script is executable
+cp -v ./status.js "$INSTALL_DIR/" # Copy status script
+# Ensure scripts are executable
 chmod +x "$INSTALL_DIR/run.js"
+chmod +x "$INSTALL_DIR/status.js"
 echo_green "    Application files copied to $INSTALL_DIR"
 echo
 

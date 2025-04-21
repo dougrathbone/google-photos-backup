@@ -146,6 +146,56 @@ An installer script is provided to set up the application and run it periodicall
 
 Your photos will now synchronize based on the schedule you selected. You can check the status and logs using the `systemctl --user` and `journalctl --user` commands provided by the installer.
 
+## Updating the Application
+
+If you have previously installed the application using `installer.sh`, you can update it using the `updater.sh` script:
+
+1.  Navigate to the directory where you cloned the source code repository.
+2.  Pull the latest changes from the repository (e.g., `git pull origin main`).
+3.  Make the updater script executable (if you haven't already):
+    ```bash
+    chmod +x updater.sh
+    ```
+4.  Run the updater script from the **root of the repository clone**:
+    ```bash
+    ./updater.sh
+    ```
+5.  Confirm when prompted.
+6.  **Important:** The script will stop the running service/timer. You must **manually restart** it after the update using the command provided by the script (e.g., `systemctl --user restart google-photos-backup.timer` or `systemctl --user restart google-photos-backup.service`).
+
+## Uninstalling the Application
+
+To remove the application, its configuration files, logs, state file, and systemd units, run the `uninstaller.sh` script:
+
+1.  Make the uninstaller script executable:
+    ```bash
+    chmod +x uninstaller.sh
+    ```
+2.  Run the uninstaller script:
+    ```bash
+    ./uninstaller.sh
+    ```
+3.  Confirm when prompted.
+
+**Warning:** This will permanently delete the installed application code and configuration. It will **not** delete the downloaded photos folder unless it happens to be inside the default installation data directory (`~/.local/share/google-photos-backup/data`), which is not the default configuration.
+
+## Checking Status
+
+Once installed, you can check the status of the synchronization process using the provided script. Run this command from your terminal:
+
+```bash
+# Navigate to the installation directory first if needed
+~/.local/share/google-photos-backup/status.js
+```
+
+This will show:
+*   The last known state (idle, running, failed).
+*   If currently running: Process ID, start time, items processed/total for the current run, and progress percentage.
+*   Timestamp of the last successful sync.
+*   Summary message from the last completed run.
+
+Note: The status file provides snapshots. Real-time speed and ETA calculation are not currently implemented.
+
 ## Concurrency
 
-The application uses a lock file (`google-photos-backup.lock` in the config directory) to prevent multiple instances from running simultaneously if the timer triggers a new run before the previous one has finished. 
+The application uses a lock file (`
