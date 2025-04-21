@@ -4,11 +4,24 @@ A Node.js application to synchronize your Google Photos library to a local direc
 
 **Version:** 0.1 (In Development)
 
-**Note:** This project is currently under active development. Core synchronization logic is not yet fully implemented.
+**Note:** This project is currently under active development.
 
-## Purpose
+## ⚠️ Important Warning: API Policy Changes ⚠️
 
-This tool aims to provide a reliable way for users (primarily on Linux, but adaptable) to back up and synchronize their Google Photos library to a local directory. It's designed to run potentially as a background service, keeping a local copy reasonably up-to-date with the cloud library.
+**As of March 31, 2025, Google Photos API policy changes prevent applications from accessing a user's full photo library using the methods employed by this tool.** 
+
+Specifically, the necessary read-only scopes have been removed, and API calls to list/search media items are restricted to only items created *by this application*.
+
+**What this means:**
+*   This tool, in its current form, **cannot reliably back up or synchronize your entire existing Google Photos library.** It relies on API behavior that is no longer officially supported.
+*   While it might *appear* to partially work under certain conditions (e.g., during Google's gradual enforcement rollout or with newly uploaded photos), this functionality **may break completely at any time without notice.**
+*   Using this tool for full library backup purposes is **unsupported and potentially unreliable.**
+
+This project is maintained here primarily for educational/demonstration purposes of interacting with Node.js, API authentication, file handling, etc., but it **should not be relied upon for critical backups** of your complete Google Photos library due to these API limitations.
+
+## Purpose (Original Goal - Now Limited by API Policy)
+
+This tool *originally aimed* to provide a reliable way for users (primarily on Linux, but adaptable) to back up and synchronize their Google Photos library to a local directory. It's designed to run potentially as a background service, keeping a local copy reasonably up-to-date with the cloud library.
 
 This addresses the need for:
 *   Local backups of your Google Photos.

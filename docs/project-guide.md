@@ -8,6 +8,8 @@
 
 This document outlines the requirements for a new Linux application, `gphotos-sync-linux`. The primary purpose of this application is to provide a reliable way for users to back up and synchronize their Google Photos library to a local directory on their Linux machine. It aims to run unobtrusively in the background as a service, ensuring the local copy stays reasonably up-to-date with the cloud library. This addresses the need for local backups, offline access, and potential integration with other local media workflows.
 
+**IMPORTANT NOTE (April 2025):** Due to significant changes in the Google Photos Library API policy effective March 31, 2025, applications like this can no longer reliably access a user's full photo library for backup/sync purposes using the `photoslibrary.readonly` scope or equivalent methods. API access is now restricted primarily to media items created *by the application itself*. Therefore, this project, while demonstrating various technical concepts, **should only be considered for development, educational, or testing purposes in its current form.** It cannot fulfill the original goal of a complete library backup via the Library API.
+
 **2. Goals**
 
 * **Connect & Authenticate:** Securely connect to a user's Google Photos account using the Google Photos API.
