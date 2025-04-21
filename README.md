@@ -119,4 +119,31 @@ Unit tests are written using [Jest](https://jestjs.io/). To run the test suite:
 npm test
 ```
 
-This command will execute all tests located in the `tests/` directory. 
+This command will execute all tests located in the `tests/` directory.
+
+## Installation (Linux with systemd)
+
+An installer script is provided to set up the application and run it periodically as a systemd user service.
+
+1.  **Make Installer Executable:**
+    ```bash
+    chmod +x installer.sh
+    ```
+2.  **Run Installer:**
+    ```bash
+    ./installer.sh
+    ```
+3.  **Follow Prompts:** The installer will ask you to choose a synchronization schedule (Hourly, Daily, or Weekly).
+4.  **Place Credentials:** AFTER the installer completes, copy your downloaded `client_secret.json` file into the configuration directory shown by the installer (usually `~/.config/gphotos-sync-node/`).
+5.  **Manual First Run (IMPORTANT):** BEFORE starting the timer/service, you MUST run the application manually once from your terminal to perform the initial Google Account authorization (OAuth flow). The installer will print the command (e.g., `cd ~/.local/share/gphotos-sync-node && ./run.js`). Follow the on-screen instructions to copy the URL, authorize in your browser, and paste the code back into the terminal.
+6.  **Start Timer:** Once authorized, start the timer to enable scheduled syncs:
+    ```bash
+    # Use the exact timer name shown by the installer
+    systemctl --user start gphotos-sync-node.timer 
+    ```
+
+Your photos will now synchronize based on the schedule you selected. You can check the status and logs using the `systemctl --user` and `journalctl --user` commands provided by the installer.
+
+## Concurrency
+
+The application uses a lock file (`gphotos-sync.lock` in the config directory) to prevent multiple instances from running simultaneously if the timer triggers a new run before the previous one has finished. 
