@@ -102,8 +102,13 @@ async function downloadMediaItem(mediaItem, localDirectory, logger, unlinkFn = f
     } catch (error) {
         logger.error(`Failed to download ${uniqueFilename} from ${downloadUrl}: ${error.message}`);
         if (error.response) {
-            // Log details if it's an axios HTTP error
-            logger.error(`Download error status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
+            // Log status separately
+            logger.error(`Download error status: ${error.response.status}`);
+            // Log the error object itself (or just data) - Winston can handle it
+            logger.error('Download error response data:', error.response.data); 
+        } else {
+            // Log the whole error if it's not an axios response error
+             logger.error('Download failed with non-HTTP error:', error);
         }
         return false;
     }
