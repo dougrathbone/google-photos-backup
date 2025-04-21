@@ -194,7 +194,7 @@ describe('Downloader', () => {
         });
 
        // TODO: Revisit and fix this test - Mocking/event handling issue?
-       test.skip('should reject and cleanup if write stream fails', async () => {
+       test('should reject and cleanup if write stream fails', async () => {
             const mockReadStream = new PassThrough();
             const mockWriteStream = new Writable({ write(c,e,cb) { cb();} });
             mockWriteStream.close = jest.fn(); 
@@ -216,17 +216,15 @@ describe('Downloader', () => {
                 mockMediaItemPhoto, 
                 mockDirectory, 
                 mockLogger, 
-                mockUnlinkFn // Pass the specific mock function
+                mockUnlinkFn 
             );
             
             // Emit error shortly after pipe starts
             setTimeout(() => mockWriteStream.emit('error', writeError), 10);
             mockReadStream.push('data'); // Start the pipe
-            mockReadStream.end(); // End the read stream
 
             try {
                 await downloadPromise;
-                // If it reaches here, the promise resolved unexpectedly.
             } catch (error) {
                 expect(error).toBe(writeError);
                 expect(errorEmitted).toBe(true); 
@@ -239,7 +237,7 @@ describe('Downloader', () => {
         });
 
         // TODO: Revisit and fix this test - Mocking/event handling issue?
-        test.skip('should reject and cleanup if read stream fails', async () => {
+        test('should reject and cleanup if read stream fails', async () => {
             const mockReadStream = new PassThrough();
             const mockWriteStream = new Writable({ write(c,e,cb) { cb();} });
             mockWriteStream.close = jest.fn();
