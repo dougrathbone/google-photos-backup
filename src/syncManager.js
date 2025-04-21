@@ -1,6 +1,7 @@
 const path = require('path');
 const { getAllMediaItems, getAllAlbums, getAlbumMediaItems, searchMediaItemsByDate } = require('./googlePhotosApi');
 const { ensureDirectoryExists, downloadMediaItem } = require('./downloader');
+const statusUpdater = require('./statusUpdater'); // Import status updater
 
 /**
  * Performs the initial synchronization.
@@ -30,6 +31,7 @@ async function runInitialSync(accessToken, config, logger) {
     let itemsFailed = 0;
     const downloadedIds = new Set();
     let downloadLimitReached = false; // Flag to break outer loops
+    let summary = ''; // To store final summary string
 
     try {
         // 1. Ensure the root directory exists
@@ -39,6 +41,8 @@ async function runInitialSync(accessToken, config, logger) {
         logger.info('--- Processing Albums ---');
         const allAlbums = await getAllAlbums(accessToken, logger, maxPages);
         albumsProcessed = allAlbums.length; 
+
+        await statusUpdater.setSyncStartStatus('initial', 0, null, logger); // Initial item count unknown
 
         for (const album of allAlbums) {
             if (downloadLimitReached) break; // Stop processing albums if limit hit
@@ -54,6 +58,10 @@ async function runInitialSync(accessToken, config, logger) {
             try {
                 await ensureDirectoryExists(albumDirectory, logger);
                 const albumItems = await getAlbumMediaItems(album.id, accessToken, logger, maxPages);
+                // Update total items once known for the album
+                await statusUpdater.updateStatus({ 
+                    currentRunTotalItems: statusUpdater.currentStatus.currentRunTotalItems + albumItems.length 
+                }, logger);
                 itemsProcessed += albumItems.length; 
                 logger.info(`Found ${albumItems.length} items in album "${safeAlbumTitle}"...`);
 
@@ -70,6 +78,7 @@ async function runInitialSync(accessToken, config, logger) {
                             itemsDownloaded++;
                             downloadsDone++; // Increment counter only on successful/skipped download
                             downloadedIds.add(item.id);
+                            await statusUpdater.incrementDownloadedCount(logger); // Increment status
                         } else {
                             itemsFailed++;
                             logger.warn(`Failed to process item ${item.id} (${item.filename}) in album "${safeAlbumTitle}"`);
@@ -94,6 +103,11 @@ async function runInitialSync(accessToken, config, logger) {
             const allMainMediaItems = await getAllMediaItems(accessToken, logger, maxPages);
             let mainStreamItemsAttempted = 0;
 
+            // Update total items once known for main stream
+            await statusUpdater.updateStatus({ 
+                currentRunTotalItems: statusUpdater.currentStatus.currentRunTotalItems + allMainMediaItems.filter(i => !downloadedIds.has(i.id)).length
+            }, logger);
+
             for (const item of allMainMediaItems) {
                 if (downloadLimitReached) break; // Check limit again for main stream
                 if (!downloadedIds.has(item.id)) {
@@ -110,6 +124,7 @@ async function runInitialSync(accessToken, config, logger) {
                         if (success) {
                             itemsDownloaded++;
                             downloadsDone++; // Increment counter
+                            await statusUpdater.incrementDownloadedCount(logger); // Increment status
                         } else {
                             itemsFailed++;
                             logger.warn(`Failed to process item ${item.id} (${item.filename}) from main stream`);
@@ -125,14 +140,17 @@ async function runInitialSync(accessToken, config, logger) {
         logger.info('--- Finished Processing Main Stream ---');
 
         logger.info('Initial synchronization finished.');
-        logger.info(`Summary: Albums Processed: ${albumsProcessed}, Total Items Encountered: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}` + (maxPages > 0 ? ' (Page limit applied)' : '') + (maxDownloads > 0 && downloadLimitReached ? ' (Download limit reached)' : ''));
+        summary = `Summary: Albums Processed: ${albumsProcessed}, Total Items Encountered: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}` + (maxPages > 0 ? ' (Page limit applied)' : '') + (maxDownloads > 0 && downloadLimitReached ? ' (Download limit reached)' : '');
+        logger.info(summary);
+        await statusUpdater.setSyncEndStatus(true, summary, logger); // Update status on success
         
         return { success: true, albumsProcessed, itemsProcessed, itemsDownloaded, itemsFailed };
 
     } catch (error) {
-        // Catch critical errors from ensureDirectoryExists, getAllAlbums, or getAllMediaItems
-        logger.error(`Initial synchronization failed critically: ${error.message}`);
-        return { success: false, albumsProcessed: 0, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: itemsProcessed };
+        summary = `Initial sync failed critically: ${error.message}`;
+        logger.error(summary);
+        await statusUpdater.setSyncEndStatus(false, summary, logger); // Update status on failure
+        return { success: false, albumsProcessed: 0, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: 0 }; // Return original structure on error
     }
 }
 
@@ -151,6 +169,7 @@ async function runIncrementalSync(lastSyncTimestamp, accessToken, config, logger
     const localDirectory = config.localSyncDirectory;
     const maxDownloads = config.debugMaxDownloads || 0; // Get download limit
     let downloadsDone = 0; // Counter
+    let summary = '';
 
     logger.info(`Starting incremental synchronization since ${lastSyncTimestamp}...`);
      if (maxDownloads > 0) {
@@ -165,6 +184,8 @@ async function runIncrementalSync(lastSyncTimestamp, accessToken, config, logger
         // 1. Ensure the root directory exists (might not be strictly necessary, but safe)
         await ensureDirectoryExists(localDirectory, logger);
 
+        await statusUpdater.setSyncStartStatus('incremental', 0, lastSyncTimestamp, logger); // Item count unknown initially
+
         // 2. Search for new media items since the last sync
         const newMediaItems = await searchMediaItemsByDate(
             lastSyncTimestamp, 
@@ -173,6 +194,8 @@ async function runIncrementalSync(lastSyncTimestamp, accessToken, config, logger
             logger
         );
         itemsProcessed = newMediaItems.length;
+         // Update status with actual count
+        await statusUpdater.updateStatus({ currentRunTotalItems: itemsProcessed }, logger);
         logger.info(`Found ${itemsProcessed} new items since last sync.`);
 
         // 3. Download new items
@@ -187,6 +210,7 @@ async function runIncrementalSync(lastSyncTimestamp, accessToken, config, logger
                 if (success) {
                     itemsDownloaded++;
                     downloadsDone++; // Increment counter
+                    await statusUpdater.incrementDownloadedCount(logger); // Increment status
                 } else {
                     itemsFailed++;
                     logger.warn(`Failed to process new item ${item.id} (${item.filename})`);
@@ -201,15 +225,17 @@ async function runIncrementalSync(lastSyncTimestamp, accessToken, config, logger
         }
 
         logger.info('Incremental synchronization finished.');
-        logger.info(`Summary: New Items Found: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}` + (maxDownloads > 0 && downloadsDone >= maxDownloads ? ' (Download limit reached)' : ''));
+        summary = `Summary: New Items Found: ${itemsProcessed}, Succeeded/Skipped: ${itemsDownloaded}, Failed: ${itemsFailed}` + (maxDownloads > 0 && downloadsDone >= maxDownloads ? ' (Download limit reached)' : '');
+        logger.info(summary);
+        await statusUpdater.setSyncEndStatus(true, summary, logger); // Update status on success
         
-        // Consider successful if it ran through all new items without critical API errors
         return { success: true, itemsProcessed, itemsDownloaded, itemsFailed };
 
     } catch (error) {
-        // Catch critical errors from ensureDirectoryExists or searchMediaItemsByDate
-        logger.error(`Incremental synchronization failed critically: ${error.message}`);
-        return { success: false, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: itemsProcessed };
+        summary = `Incremental sync failed critically: ${error.message}`;
+        logger.error(summary);
+        await statusUpdater.setSyncEndStatus(false, summary, logger); // Update status on failure
+        return { success: false, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: 0 }; // Return original structure on error
     }
 }
 

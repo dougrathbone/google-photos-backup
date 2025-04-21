@@ -90,11 +90,14 @@ echo_blue "Copying application files to $INSTALL_DIR ..."
 # Assuming installer is run from the project root
 cp -Rv ./src "$INSTALL_DIR/"
 cp -v ./package.json "$INSTALL_DIR/"
-cp -v ./package-lock.json "$INSTALL_DIR/"
+[ -f ./package-lock.json ] && cp -v ./package-lock.json "$INSTALL_DIR/" || echo_yellow "    package-lock.json not found in source, skipping."
 cp -v ./run.js "$INSTALL_DIR/"
+cp -v ./status.js "$INSTALL_DIR/" # Copy status script
 # Make run script executable
 chmod +x "$INSTALL_DIR/run.js"
-echo_green "Application files copied."
+chmod +x "$INSTALL_DIR/status.js" # Make status script executable
+echo_green "    Application files copied to $INSTALL_DIR"
+echo
 
 # --- Install Production Dependencies ---
 echo_blue "Installing production Node.js dependencies in $INSTALL_DIR ..."
@@ -218,6 +221,7 @@ echo " To check timer status: systemctl --user status $TIMER_FILE_NAME"
 echo " To check service status/logs: systemctl --user status $SERVICE_FILE_NAME"
 echo " To view live logs: journalctl --user -u $SERVICE_FILE_NAME -f"
 echo " To trigger a sync manually now: systemctl --user start $SERVICE_FILE_NAME"
+echo " To check the sync status: $INSTALL_DIR/status.js"
 echo
 echo_green "Setup finished. Remember to place credentials and run manually once!"
 

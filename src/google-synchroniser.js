@@ -1,6 +1,7 @@
 const path = require('path');
 const winston = require('winston');
 const lockfile = require('proper-lockfile');
+const statusUpdater = require('./statusUpdater');
 const { loadConfig } = require('./configLoader');
 const { authorize } = require('./googleAuth');
 const { findLatestFileDateRecursive } = require('./fileUtils');
@@ -66,24 +67,29 @@ if (config.debugMaxDownloads && config.debugMaxDownloads > 0) {
 // --- Main Application Logic ---
 
 async function main() {
-    let releaseLock = async () => {}; // No-op function for releasing lock
-    let isContinuous = false; // Flag to control main loop
-    
+    let releaseLock = async () => {};
+    let isContinuous = false;
+    let dataDir = path.dirname(config.logFilePath); // Infer data dir from log path
+    let accessToken = null;
+    let authClient = null;
+
     try {
+        // --- Initialize Status File ---
+        await statusUpdater.initializeStatus(dataDir, logger);
+
         // --- Acquire Lock ---
         logger.info(`Attempting to acquire lock: ${lockFilePath}`);
         try {
-             // Options: stale: duration lock is considered stale, retries: attempts
-             releaseLock = await lockfile.lock(lockFilePath, { stale: 3 * 60 * 1000, retries: 0 }); // 3 min stale, no retries
-             logger.info('Lock acquired successfully.');
+            // Options: stale: duration lock is considered stale, retries: attempts
+            releaseLock = await lockfile.lock(lockFilePath, { stale: 3 * 60 * 1000, retries: 0 }); // 3 min stale, no retries
+            logger.info('Lock acquired successfully.');
         } catch (error) {
-             if (error.code === 'ELOCKED') {
-                 logger.warn(`Lock file ${lockFilePath} already held by another process. Exiting.`);
-                 process.exit(0); // Exit gracefully, not an error
-             } else {
-                 // Rethrow other lock errors
-                 throw error;
-             }
+            if (error.code === 'ELOCKED') {
+                logger.warn(`Lock file ${lockFilePath} already held by another process. Checking status file...`);
+                process.exit(0); // Exit gracefully
+            } else {
+                throw error; // Rethrow other lock errors
+            }
         }
 
         // --- Original Main Logic ---
@@ -96,8 +102,6 @@ async function main() {
         
         // --- Authentication ---
         let authResult = null;
-        let accessToken = null; 
-        let authClient = null; 
         
         try {
             authResult = await authorize(config.credentialsPath, config.stateFilePath, logger);
@@ -113,8 +117,11 @@ async function main() {
             process.exit(1); // Exit if authentication fails
         }
 
+        if (!accessToken) throw new Error('Authentication failed, cannot proceed.');
+
         // --- Initial Run / State Load ---
         let currentState = await loadState(config.stateFilePath, logger);
+        await statusUpdater.updateStatus({ lastSyncTimestamp: currentState.lastSyncTimestamp }, logger);
         let lastSyncTime = currentState.lastSyncTimestamp;
         logger.info(`Current state loaded. Last sync timestamp: ${lastSyncTime || 'Never'}`);
 
@@ -162,6 +169,7 @@ async function main() {
         if (syncSuccess) {
             currentState = { ...currentState, lastSyncTimestamp: syncTimestamp.toISOString() };
             await saveState(config.stateFilePath, currentState, logger);
+            await statusUpdater.updateStatus({ lastSyncTimestamp: currentState.lastSyncTimestamp }, logger);
             lastSyncTime = currentState.lastSyncTimestamp; // Update variable for continuous loop
         } else {
             logger.warn('Initial/Incremental sync run failed, not updating state file timestamp.');
@@ -195,6 +203,7 @@ async function main() {
                     if (incrementalSyncResult.success) {
                         currentState = { ...currentState, lastSyncTimestamp: syncTimestamp.toISOString() };
                         await saveState(config.stateFilePath, currentState, logger);
+                        await statusUpdater.updateStatus({ lastSyncTimestamp: currentState.lastSyncTimestamp }, logger);
                         lastSyncTime = currentState.lastSyncTimestamp; // Update for next loop
                         logger.info('Continuous mode: Incremental sync successful, state updated.');
                     } else {
@@ -209,16 +218,16 @@ async function main() {
             }
         } else {
              logger.info('Application finished (non-continuous mode).');
+             await statusUpdater.setIdleStatus(logger); // Set status to idle on exit
         }
         // --- End Original Main Logic ---
 
     } catch (error) {
         logger.error('Unhandled error in main execution scope:', error);
-        // Ensure lock is released even on unhandled errors
+        await statusUpdater.updateStatus({ status: 'failed', lastRunSummary: `Main scope error: ${error.message}` }, logger);
         await releaseLock(); 
-        process.exit(1); // Exit with error code
+        process.exit(1); 
     } finally {
-        // Release lock only if NOT in continuous mode (it should run forever)
         if (!isContinuous) { 
             await releaseLock();
             logger.info('Lock released.');
@@ -226,4 +235,42 @@ async function main() {
     }
 }
 
+// --- Graceful Shutdown Handling ---
+let exiting = false;
+async function gracefulShutdown(signal) {
+    if (exiting) return; // Prevent duplicate shutdowns
+    exiting = true;
+    logger.warn(`Received ${signal}. Shutting down gracefully...`);
+    
+    // Try to release lock
+    try {
+        const releaseLock = await lockfile.lock(lockFilePath, { retries: 0 });
+        await releaseLock();
+        logger.info('Lock released during shutdown.');
+    } catch (err) {
+        // Ignore lock errors during shutdown (might be held by self or already gone)
+        if (err.code !== 'ELOCKED') {
+             logger.warn(`Error releasing lock during shutdown: ${err.message}`);
+        }
+    }
+    
+    // Try to set status to idle
+    try {
+         // Re-infer dataDir in case main didn't run far enough
+         const dataDir = path.dirname(config?.logFilePath || './gphotos_sync.log');
+         await statusUpdater.initializeStatus(dataDir, logger); // Ensure path is set
+         await statusUpdater.setIdleStatus(logger); 
+         logger.info('Status set to idle during shutdown.');
+    } catch (err) {
+        logger.error(`Error setting idle status during shutdown: ${err.message}`);
+    }
+
+    logger.info('Graceful shutdown complete.');
+    process.exit(0);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// --- Run Main --- 
 main(); 
