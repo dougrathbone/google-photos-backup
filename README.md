@@ -1,6 +1,6 @@
-# Google Photos Synchroniser (`gphotos-sync-node`)
+# Google Photos Backup
 
-A Node.js application to synchronize your Google Photos library to a local directory.
+A Node.js application to back up your Google Photos library to a local directory.
 
 **Version:** 0.1 (In Development)
 
@@ -140,15 +140,17 @@ An installer script is provided to set up the application and run it periodicall
 6.  **Start Timer or Service:** Once authorized:
     *   If you chose **Hourly, Daily, or Weekly**, start the **timer**: 
         ```bash
-        systemctl --user start gphotos-sync-node.timer
+        # Use the exact timer name shown by the installer (e.g., google-photos-backup.timer)
+        systemctl --user start google-photos-backup.timer
         ```
     *   If you chose **Continuous**, start the **service** directly:
         ```bash
-        systemctl --user start gphotos-sync-node.service
+        # Use the exact service name shown by the installer (e.g., google-photos-backup.service)
+        systemctl --user start google-photos-backup.service
         ```
 
 Your photos will now synchronize based on the schedule you selected. You can check the status and logs using the `systemctl --user` and `journalctl --user` commands provided by the installer.
 
 ## Concurrency
 
-The application uses a lock file (`gphotos-sync.lock` in the config directory) to prevent multiple instances from running simultaneously if the timer triggers a new run before the previous one has finished. 
+The application uses a lock file (`google-photos-backup.lock` in the config directory) to prevent multiple instances from running simultaneously if the timer triggers a new run before the previous one has finished. 

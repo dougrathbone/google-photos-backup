@@ -1,7 +1,7 @@
 {
-  "name": "google-synchroniser",
+  "name": "google-photos-backup",
   "version": "1.0.0",
-  "description": "Google Photos synchronisation tool",
+  "description": "Google Photos Backup tool (Node.js)",
   "main": "src/google-synchroniser.js",
   "directories": {
     "doc": "docs"

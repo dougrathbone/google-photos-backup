@@ -1,4 +1,4 @@
-# Project Plan: Google Photos Synchroniser/Backup
+# Project Plan: Google Photos Backup
 
 ## Initial Setup
 
