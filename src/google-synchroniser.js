@@ -50,6 +50,8 @@ const logger = winston.createLogger({
 // Define lock file path (use config dir or data dir? Config seems better)
 const lockFilePath = path.join(path.dirname(configPath), 'gphotos-sync.lock'); 
 
+const CONTINUOUS_MODE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
 logger.info("Starting google-synchroniser...");
 logger.info(`Using configuration file: ${configPath}`);
 // Log if debug modes are active
@@ -64,6 +66,8 @@ if (config.debugMaxDownloads && config.debugMaxDownloads > 0) {
 
 async function main() {
     let releaseLock = async () => {}; // No-op function for releasing lock
+    let isContinuous = false; // Flag to control main loop
+    
     try {
         // --- Acquire Lock ---
         logger.info(`Attempting to acquire lock: ${lockFilePath}`);
@@ -81,15 +85,14 @@ async function main() {
              }
         }
 
+        // --- Original Main Logic ---
         logger.info("Application starting...");
         logger.info(`Local sync directory: ${config.localSyncDirectory}`);
         logger.info(`Sync interval: ${config.syncIntervalHours} hours`);
 
-        // Log if debug mode is active
-        if (config.debugMaxPages && config.debugMaxPages > 0) {
-            logger.warn(`*** Debug mode enabled: Max ${config.debugMaxPages} pages will be fetched for initial sync. ***`);
-        }
-
+        // Check if continuous mode is set in config
+        isContinuous = !!config.continuousMode;
+        
         // --- Authentication ---
         let authResult = null;
         let accessToken = null; 
@@ -109,9 +112,9 @@ async function main() {
             process.exit(1); // Exit if authentication fails
         }
 
-        // --- Load State ---
+        // --- Initial Run / State Load ---
         let currentState = await loadState(config.stateFilePath, logger);
-        const lastSyncTime = currentState.lastSyncTimestamp;
+        let lastSyncTime = currentState.lastSyncTimestamp;
         logger.info(`Current state loaded. Last sync timestamp: ${lastSyncTime || 'Never'}`);
 
         // --- Startup Status Logging ---
@@ -140,61 +143,86 @@ async function main() {
         logger.info('Sync difference calculation pending implementation of state management and sync logic.');
 
         // --- Synchronization Logic ---
+        let initialRun = !lastSyncTime;
         let syncSuccess = false;
         let syncTimestamp = new Date(); 
         
-        if (!lastSyncTime) {
-            // Run Initial Sync (pass full config)
-            logger.info('Initial sync required (no previous sync timestamp found).');
-            try {
-                const initialSyncResult = await runInitialSync(accessToken, config, logger);
-                syncSuccess = initialSyncResult.success; 
-            } catch (error) {
-                logger.error(`Initial sync failed with unhandled error: ${error.message}`);
-                syncSuccess = false;
-            }
+        if (initialRun) {
+            logger.info('Performing initial sync...');
+            const initialSyncResult = await runInitialSync(accessToken, config, logger);
+            syncSuccess = initialSyncResult.success;
         } else {
-            // Run Incremental Sync
-            logger.info(`Incremental sync needed (Last sync: ${lastSyncTime}).`);
-            try {
-                // Pass the full config object
-                const incrementalSyncResult = await runIncrementalSync(
-                    lastSyncTime, 
-                    accessToken, 
-                    config, // Pass full config 
-                    logger
-                );
-                syncSuccess = incrementalSyncResult.success;
-            } catch (error) {
-                logger.error(`Incremental sync failed with unhandled error: ${error.message}`);
-                syncSuccess = false;
-            }
+            logger.info(`Performing incremental sync (Last sync: ${lastSyncTime})...`);
+            const incrementalSyncResult = await runIncrementalSync(lastSyncTime, accessToken, config, logger);
+            syncSuccess = incrementalSyncResult.success;
         }
 
-        // --- Save State ---
+        // --- Save State After First Sync ---
         if (syncSuccess) {
-            // Save the timestamp of the *start* of the successful sync run
-            const newState = { ...currentState, lastSyncTimestamp: syncTimestamp.toISOString() };
-            try {
-                await saveState(config.stateFilePath, newState, logger);
-            } catch (error) {
-                logger.error(`Failed to save final state: ${error.message}`);
-            }
+            currentState = { ...currentState, lastSyncTimestamp: syncTimestamp.toISOString() };
+            await saveState(config.stateFilePath, currentState, logger);
+            lastSyncTime = currentState.lastSyncTimestamp; // Update variable for continuous loop
         } else {
-             logger.warn('Sync run failed or was not needed, not updating state file timestamp.');
+            logger.warn('Initial/Incremental sync run failed, not updating state file timestamp.');
+            // Exit if the first sync fails, even in continuous mode?
+            if (isContinuous) {
+                logger.error('Exiting continuous mode due to initial sync failure.');
+                throw new Error('Initial sync failed, cannot continue in continuous mode.');
+            }
         }
 
-        logger.info('Application finished.');
+        // --- Continuous Mode Loop ---
+        if (isContinuous) {
+            logger.info(`Entering continuous mode. Checking for updates every ${CONTINUOUS_MODE_INTERVAL_MS / 1000 / 60} minutes.`);
+            // Loop indefinitely (or until service is stopped)
+            while (true) {
+                try {
+                    // Wait for the interval
+                    logger.info(`Continuous mode: Waiting for ${CONTINUOUS_MODE_INTERVAL_MS / 1000} seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, CONTINUOUS_MODE_INTERVAL_MS));
+                    
+                    logger.info(`Continuous mode: Performing incremental sync (Last sync: ${lastSyncTime})...`);
+                    syncTimestamp = new Date(); // Timestamp for this specific sync
+                    const incrementalSyncResult = await runIncrementalSync(
+                        lastSyncTime, 
+                        accessToken, 
+                        config, 
+                        logger
+                    );
+                    
+                    // Save state only if successful
+                    if (incrementalSyncResult.success) {
+                        currentState = { ...currentState, lastSyncTimestamp: syncTimestamp.toISOString() };
+                        await saveState(config.stateFilePath, currentState, logger);
+                        lastSyncTime = currentState.lastSyncTimestamp; // Update for next loop
+                        logger.info('Continuous mode: Incremental sync successful, state updated.');
+                    } else {
+                         logger.warn('Continuous mode: Incremental sync failed, state not updated.');
+                    }
+
+                } catch (loopError) {
+                    // Log errors within the loop but don't exit the process
+                    logger.error('Continuous mode: Error during incremental sync loop:', loopError);
+                    logger.warn('Continuous mode: Will retry after the next interval.');
+                }
+            }
+        } else {
+             logger.info('Application finished (non-continuous mode).');
+        }
+        // --- End Original Main Logic ---
+
     } catch (error) {
-        logger.error('Unhandled error in main function:', error);
+        logger.error('Unhandled error in main execution scope:', error);
         // Ensure lock is released even on unhandled errors
         await releaseLock(); 
         process.exit(1); // Exit with error code
     } finally {
-        // Ensure lock is always released on normal exit
-        await releaseLock();
-        logger.info('Lock released.');
+        // Release lock only if NOT in continuous mode (it should run forever)
+        if (!isContinuous) { 
+            await releaseLock();
+            logger.info('Lock released.');
+        }
     }
 }
 
-main(); // Remove the .catch here, handle inside main 
+main(); 

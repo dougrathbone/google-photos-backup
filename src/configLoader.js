@@ -30,7 +30,7 @@ function loadConfig(filePath) {
     console.log("Configuration loaded successfully."); // Still using console here
 
     const requiredKeys = ['localSyncDirectory', 'syncIntervalHours', 'credentialsPath', 'logFilePath', 'stateFilePath'];
-    const optionalKeys = ['debugMaxPages', 'debugMaxDownloads'];
+    const optionalKeys = ['debugMaxPages', 'debugMaxDownloads', 'continuousMode'];
     
     const missingKeys = requiredKeys.filter(key => !(key in config));
     if (missingKeys.length > 0) {
@@ -55,6 +55,15 @@ function loadConfig(filePath) {
     } else {
         // Ensure it's set to 0 if null or undefined for easier checks later
         config.debugMaxDownloads = 0;
+    }
+
+    // Validate optional continuousMode if present
+    if (config.continuousMode !== undefined && config.continuousMode !== null) {
+        if (typeof config.continuousMode !== 'boolean') {
+            throw new Error('Invalid configuration: continuousMode must be true or false.');
+        }
+    } else {
+        config.continuousMode = false; // Default to false
     }
 
     // Resolve relative paths in config to absolute paths based on config file's directory

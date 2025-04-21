@@ -1,19 +1,23 @@
 [Unit]
 Description=Google Photos Sync Node Service
-# Ensures network is available before starting
-After=network.target network-online.target
-Wants=network-online.target
+# Ensures network is available before starting (Optional, script might handle delays)
+# After=network.target network-online.target
+# Wants=network-online.target
 
 [Service]
+# Type is always simple; script manages its own lifetime (runs once or loops)
 Type=simple
+
 # IMPORTANT: The paths below will be replaced by the installer script
 # with the actual installation paths.
 ExecStart=/path/to/installation/run.js
 WorkingDirectory=/path/to/installation
 
-# Restart the service if it fails
+# Restart the service if the Node process crashes (e.g., unhandled error)
 Restart=on-failure
-RestartSec=5
+RestartSec=30 # Wait 30 seconds before restarting
+
+# Lock file logic within run.js prevents concurrent runs even with Restart=
 
 # Optional: Specify Node path if needed, especially if installed via nvm
 # Environment="PATH=/home/user/.nvm/versions/node/vXX.Y.Z/bin:/usr/bin:/bin"
@@ -23,4 +27,6 @@ RestartSec=5
 # Group=
 
 [Install]
+# This section is used when enabling the SERVICE directly (for continuous mode)
+# For scheduled mode, the TIMER file's [Install] section is used.
 WantedBy=default.target 

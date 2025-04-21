@@ -24,7 +24,8 @@ describe('Config Loader', () => {
         logFilePath: './app.log',
         stateFilePath: './state.json',
         debugMaxPages: 0,
-        debugMaxDownloads: 0 // Add default
+        debugMaxDownloads: 0,
+        continuousMode: false // Add default
     };
 
     beforeEach(() => {
@@ -161,6 +162,45 @@ describe('Config Loader', () => {
              expect(() => {
                  loadConfig(mockConfigPath);
              }).toThrow('Invalid configuration: debugMaxDownloads must be a non-negative integer');
+        }
+    });
+
+    test('should load config successfully with continuousMode true/false', () => {
+        fs.existsSync.mockReturnValue(true);
+        let configContent = { ...baseConfigContent, continuousMode: true };
+        fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+        let config = loadConfig(mockConfigPath);
+        expect(config.continuousMode).toBe(true);
+        
+        configContent = { ...baseConfigContent, continuousMode: false };
+        fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+        config = loadConfig(mockConfigPath);
+        expect(config.continuousMode).toBe(false);
+    });
+    
+    test('should default continuousMode to false if null or missing', () => {
+        fs.existsSync.mockReturnValue(true);
+        let configContent = { ...baseConfigContent };
+        delete configContent.continuousMode; // Test missing
+        fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+        let config = loadConfig(mockConfigPath);
+        expect(config.continuousMode).toBe(false);
+
+        configContent = { ...baseConfigContent, continuousMode: null }; // Test null
+        fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+        config = loadConfig(mockConfigPath);
+        expect(config.continuousMode).toBe(false);
+    });
+
+    test('should throw error if continuousMode is not boolean', () => {
+        fs.existsSync.mockReturnValue(true);
+        const invalidValues = [0, 1, 'true', {}];
+        for (const invalidValue of invalidValues) {
+             const configContent = { ...baseConfigContent, continuousMode: invalidValue };
+             fs.readFileSync.mockReturnValue(JSON.stringify(configContent));
+             expect(() => {
+                 loadConfig(mockConfigPath);
+             }).toThrow('Invalid configuration: continuousMode must be true or false.');
         }
     });
 }); 
