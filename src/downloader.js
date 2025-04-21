@@ -86,15 +86,25 @@ async function downloadMediaItem(mediaItem, localDirectory, logger, unlinkFn = f
                 logger.info(`Successfully downloaded: ${uniqueFilename}`);
                 resolve(true);
             });
-            writer.on('error', (err) => {
+            writer.on('error', async (err) => {
                 logger.error(`Error writing file ${uniqueFilename}: ${err.message}`);
-                unlinkFn(localFilePath);
+                try {
+                    await unlinkFn(localFilePath);
+                    logger.debug(`Attempted cleanup for failed write: ${uniqueFilename}`);
+                } catch (unlinkErr) {
+                    logger.error(`Cleanup failed after write error for ${localFilePath}: ${unlinkErr.message}`);
+                }
                 reject(err);
             });
-            response.data.on('error', (err) => {
+            response.data.on('error', async (err) => {
                 logger.error(`Error during download stream for ${uniqueFilename}: ${err.message}`);
                 writer.close();
-                unlinkFn(localFilePath);
+                try {
+                    await unlinkFn(localFilePath);
+                    logger.debug(`Attempted cleanup for failed stream: ${uniqueFilename}`);
+                } catch (unlinkErr) {
+                    logger.error(`Cleanup failed after stream error for ${localFilePath}: ${unlinkErr.message}`);
+                }
                 reject(err);
             });
         });
