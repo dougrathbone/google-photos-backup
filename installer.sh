@@ -5,7 +5,7 @@ set -e
 
 # --- Configuration ---
 # Using user-specific directories based on XDG Base Directory Specification (freedesktop.org)
-APP_NAME="gphotos-sync-node"
+APP_NAME="google-photos-backup"
 INSTALL_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/$APP_NAME"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/$APP_NAME"
 DATA_DIR="$INSTALL_DIR/data" # Store logs and state within the app's data dir
@@ -15,7 +15,7 @@ SERVICE_FILE_NAME="${APP_NAME}.service"
 TIMER_FILE_NAME="${APP_NAME}.timer"
 CONFIG_FILE_NAME="config.json"
 CREDENTIALS_FILE_NAME="client_secret.json" # Expected name for user-provided credentials
-NODE_LOCK_FILE="$CONFIG_DIR/gphotos-sync.lock" # Lock file location for Node app
+NODE_LOCK_FILE="$CONFIG_DIR/${APP_NAME}.lock" # Update lock file name
 
 # --- Helper Functions ---
 echo_blue() {
@@ -126,7 +126,7 @@ echo_blue "[*] Creating systemd service file..."
 
 cat > "$SERVICE_FILE_PATH" << EOL
 [Unit]
-Description=Google Photos Sync Node Service
+Description=Google Photos Backup Service
 # Use network-online only if absolutely needed; the script might handle brief offline periods
 # After=network-online.target
 # Wants=network-online.target
@@ -163,7 +163,7 @@ else
     echo_blue "[*] Creating systemd TIMER file for '$TIMER_SPEC' schedule..."
     cat > "$TIMER_FILE_PATH" << EOL
 [Unit]
-Description=Timer to run Google Photos Sync Node periodically ($TIMER_SPEC)
+Description=Timer to run Google Photos Backup periodically ($TIMER_SPEC)
 Requires=$SERVICE_FILE_NAME # Ensure service file exists
 
 [Timer]
@@ -184,7 +184,7 @@ echo
 
 # --- Final Instructions (Adjust based on mode) ---
 echo_blue "==============================================="
-echo_green "Installation Mostly Complete!"
+echo_blue " Google Photos Backup Installer              "
 echo_blue "==============================================="
 echo
 echo_yellow " ---> IMPORTANT NEXT STEPS <--- "

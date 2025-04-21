@@ -6,18 +6,13 @@ A Node.js application to back up your Google Photos library to a local directory
 
 **Note:** This project is currently under active development.
 
-## ⚠️ Important Warning: API Policy Changes ⚠️
+## Important Note on API Limitations
 
-**As of March 31, 2025, Google Photos API policy changes prevent applications from accessing a user's full photo library using the methods employed by this tool.** 
+Please be aware that due to Google Photos API policy changes implemented after March 31, 2025, the methods used by this tool to access the full photo library (`photoslibrary.readonly` scope and unrestricted `mediaItems.list`/`.search`) are **no longer officially supported by Google** for reading non-app-created data.
 
-Specifically, the necessary read-only scopes have been removed, and API calls to list/search media items are restricted to only items created *by this application*.
+While the tool might partially function under certain circumstances, relying on it for a complete backup of your existing Google Photos library is **unsupported and may become unreliable or cease functioning** as Google enforces these policy changes.
 
-**What this means:**
-*   This tool, in its current form, **cannot reliably back up or synchronize your entire existing Google Photos library.** It relies on API behavior that is no longer officially supported.
-*   While it might *appear* to partially work under certain conditions (e.g., during Google's gradual enforcement rollout or with newly uploaded photos), this functionality **may break completely at any time without notice.**
-*   Using this tool for full library backup purposes is **unsupported and potentially unreliable.**
-
-This project is maintained here primarily for educational/demonstration purposes of interacting with Node.js, API authentication, file handling, etc., but it **should not be relied upon for critical backups** of your complete Google Photos library due to these API limitations.
+This project is primarily maintained for **educational and development purposes** (demonstrating Node.js, API auth, file handling, etc.). It should not be used for critical backups of an entire existing Google Photos library due to these API constraints.
 
 ## Purpose (Original Goal - Now Limited by API Policy)
 

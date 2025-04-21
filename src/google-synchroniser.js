@@ -48,11 +48,12 @@ const logger = winston.createLogger({
 });
 
 // Define lock file path (use config dir or data dir? Config seems better)
-const lockFilePath = path.join(path.dirname(configPath), 'gphotos-sync.lock'); 
+// NOTE: Ensure this matches the name used in installer.sh
+const lockFilePath = path.join(path.dirname(configPath), 'google-photos-backup.lock'); 
 
 const CONTINUOUS_MODE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-logger.info("Starting google-synchroniser...");
+logger.info("Starting Google Photos Backup...");
 logger.info(`Using configuration file: ${configPath}`);
 // Log if debug modes are active
 if (config.debugMaxPages && config.debugMaxPages > 0) {
