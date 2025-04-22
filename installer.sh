@@ -546,7 +546,7 @@ echo "    sudo chmod 640 \"$CONFIG_DIR/$CREDENTIALS_FILE_NAME\""
 echo
 echo " 2. Run the application MANUALLY AS THE SERVICE USER ONCE in your terminal"
 echo "    to perform the initial Google Account authorization (OAuth flow):"
-echo "    sudo -u $SERVICE_USER NODE_ENV=production node $APP_CODE_DIR/src/google-synchroniser.js"
+echo "    su $SERVICE_USER -s /bin/bash -c 'NODE_ENV=production node $APP_CODE_DIR/src/google-synchroniser.js'"
 echo "    (Follow the on-screen instructions: copy the URL, authorize in browser, paste code)"
 echo "    (The state file will be saved in $DATA_DIR)"
 echo
