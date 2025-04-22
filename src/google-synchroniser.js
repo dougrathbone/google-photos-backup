@@ -48,9 +48,9 @@ const logger = winston.createLogger({
     ]
 });
 
-// Define lock file path (use config dir or data dir? Config seems better)
-// NOTE: Ensure this matches the name used in installer.sh
-const lockFilePath = path.join(path.dirname(configPath), 'google-photos-backup.lock'); 
+// Define lock file path based on the state file's directory
+const lockFileDir = path.dirname(config.stateFilePath);
+const lockFilePath = path.join(lockFileDir, 'google-photos-backup.lock');
 
 const CONTINUOUS_MODE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
