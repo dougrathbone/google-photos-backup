@@ -162,11 +162,11 @@ echo_blue "[*] Creating default configuration file..."
 cat > "$CONFIG_PATH" << EOL
 {
   "localSyncDirectory": "$DATA_DIR/gphotos_backup",
-  "syncIntervalHours": 6, // Note: syncIntervalHours is ignored in continuous mode
-  "credentialsPath": "$CONFIG_DIR/$CREDENTIALS_FILE_NAME", // Credentials expected here
+  "syncIntervalHours": 6,
+  "credentialsPath": "$CONFIG_DIR/$CREDENTIALS_FILE_NAME",
   "logFilePath": "$LOG_DIR/$LOG_FILE_NAME",
   "stateFilePath": "$DATA_DIR/$STATE_FILE_NAME",
-  "statusFilePath": "$DATA_DIR/$STATUS_FILE_NAME", // Added for status reporting
+  "statusFilePath": "$DATA_DIR/$STATUS_FILE_NAME",
   "debugMaxPages": 0,
   "debugMaxDownloads": 0,
   "continuousMode": $CONTINUOUS_MODE
