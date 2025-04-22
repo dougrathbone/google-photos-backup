@@ -180,11 +180,19 @@ async function authorize(clientSecretsPath, tokenPath, logger) {
 
     } catch (err) {
         // Catch errors from the entire process
-        logger.error('Authorization process failed:', err.message);
+        logger.error('Authorization process failed. Details:');
+        // Log the full error object for more details (including potential stack trace)
+        logger.error(err); 
+        
         // Log specific known errors again for clarity if helpful
-        if (err.message.includes('client secret file')) {
-             logger.error('Please ensure you have downloaded your OAuth 2.0 Client credentials (client_secret.json) from the Google Cloud Console and placed it correctly.');
+        if (err.message && err.message.includes('client secret file')) {
+             logger.error('Double-check: Ensure client_secret.json exists, is readable by the service user, and contains valid JSON from Google Cloud Console.');
         }
+        // Add check for token exchange errors (often indicate wrong code or client secret mismatch)
+        if (err.response && err.response.data) {
+             logger.error('Google API Error Response:', err.response.data);
+        }
+
         return null; // Indicate failure
     }
 }
