@@ -130,10 +130,20 @@ echo
 # --- Configure Backup Directory --- 
 default_backup_dir="$DATA_DIR/gphotos_backup"
 echo_blue "[*] Configure Local Backup Directory" 
-read -p "    Enter the full path for photo backups [$default_backup_dir]: " CHOSEN_BACKUP_DIR
+read -p "    Enter the full path for photo backups [$default_backup_dir]: " user_input_backup_dir
 # Use default if user entered nothing
-CHOSEN_BACKUP_DIR=${CHOSEN_BACKUP_DIR:-$default_backup_dir}
+user_input_backup_dir=${user_input_backup_dir:-$default_backup_dir}
+# Trim leading/trailing whitespace and quotes
+shopt -s extglob # Enable extended globbing for trim
+CHOSEN_BACKUP_DIR="${user_input_backup_dir##*([[:space:]])}" # Trim leading space
+CHOSEN_BACKUP_DIR="${CHOSEN_BACKUP_DIR%%*([[:space:]])}" # Trim trailing space
+CHOSEN_BACKUP_DIR="${CHOSEN_BACKUP_DIR#\"}" # Trim leading quote
+CHOSEN_BACKUP_DIR="${CHOSEN_BACKUP_DIR%\"}" # Trim trailing quote
+CHOSEN_BACKUP_DIR="${CHOSEN_BACKUP_DIR#\'}" # Trim leading single quote
+CHOSEN_BACKUP_DIR="${CHOSEN_BACKUP_DIR%\'}" # Trim trailing single quote
+shopt -u extglob # Disable extended globbing
 
+echo_blue "    Using backup directory path: $CHOSEN_BACKUP_DIR"
 echo_blue "    Attempting to create/set permissions for: $CHOSEN_BACKUP_DIR ..."
 # Create the directory and set ownership/permissions for the service user
 if install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$CHOSEN_BACKUP_DIR"; then
