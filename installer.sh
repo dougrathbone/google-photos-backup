@@ -59,6 +59,11 @@ check_root() {
 # --- Root Check ---
 check_root
 
+# --- Detect Source Directory ---
+# Get the absolute path to the directory the script is run from
+SOURCE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+echo_blue "[*] Installer running from source directory: $SOURCE_DIR"
+
 # --- Dependency Checks ---
 echo_blue "[*] Checking dependencies..."
 check_command "node"
@@ -125,6 +130,17 @@ install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$DATA_DIR"
 install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$LOG_DIR"
 echo_green "    Core directories created/permissions set."
 # /usr/local/bin should already exist and be suitable
+echo
+
+# --- Save Source Path ---
+echo_blue "[*] Saving source directory path for updater..."
+SOURCE_PATH_FILE="$CONFIG_DIR/source.path"
+echo "$SOURCE_DIR" > "$SOURCE_PATH_FILE"
+chown root:root "$SOURCE_PATH_FILE" # Readable only by root
+chmod 600 "$SOURCE_PATH_FILE"
+echo_green "    Source path saved to $SOURCE_PATH_FILE"
+echo_yellow "    IMPORTANT: Do not delete the source directory ($SOURCE_DIR)"
+echo_yellow "               if you plan to use the 'google-photos-backup update' command."
 echo
 
 # --- Configure Backup Directory --- 
@@ -273,14 +289,75 @@ show_status() {
     fi
 }
 
-# Function for update (placeholder - needs actual implementation)
+# Function for update
 update_app() {
-    echo "Update functionality not yet implemented."
-    echo "To update manually:"
-    echo " 1. cd to the source directory where you cloned the project."
-    echo " 2. git pull origin main # Or the appropriate branch"
-    echo " 3. sudo ./installer.sh # Re-run the installer"
-    exit 1 # Indicate not implemented
+    local source_path_file="$CONFIG_DIR/source.path"
+    local source_dir=""
+
+    echo "[*] Attempting application update..."
+
+    if [ ! -f "$source_path_file" ]; then
+        echo "Error: Source path file not found at '$source_path_file'. Cannot determine update location."
+        echo "Update may not have been installed correctly, or the file was removed."
+        echo "Manual update required: git pull in your original clone directory, then run sudo ./installer.sh from there."
+        exit 1
+    fi
+
+    # Read source directory path (requires root to read the file)
+    if [ "\$(id -u)" -ne 0 ]; then
+        echo "Error: Update requires root privileges to read source path."
+        echo "Please run: sudo \$0 update"
+        exit 1
+    fi
+    source_dir=$(cat "$source_path_file")
+
+    if [ -z "$source_dir" ] || [ ! -d "$source_dir" ]; then
+        echo "Error: Source directory '$source_dir' specified in '$source_path_file' not found or invalid."
+        echo "       The directory may have been deleted or moved since installation."
+        echo "Manual update required: git pull in your original clone directory, then run sudo ./installer.sh from there."
+        exit 1
+    fi
+    
+    if [ ! -d "$source_dir/.git" ] || [ ! -f "$source_dir/installer.sh" ]; then
+         echo "Error: The source directory '$source_dir' does not appear to be a valid clone (missing .git or installer.sh)."
+         echo "Manual update required: git pull in your original clone directory, then run sudo ./installer.sh from there."
+         exit 1
+    fi
+
+    echo "Update process assumes you manage the source code via git in:"
+    echo "  $source_dir"
+    echo ""
+    echo "IMPORTANT: Please ensure you have pulled the latest changes using git:"
+    echo "  cd \"$source_dir\" && git pull"
+    echo ""
+    read -p "Have you pulled the latest code via git? (y/N): " confirm_pull
+
+    if [[ "$confirm_pull" != [yY] && "$confirm_pull" != [yY][eE][sS] ]]; then
+        echo "Update cancelled. Please run 'git pull' in the source directory first."
+        exit 0
+    fi
+
+    echo "[*] Proceeding with re-running the installer from source directory..."
+    local installer_script="$source_dir/installer.sh"
+
+    # Ensure installer script is executable before running
+    echo "[*] Ensuring installer is executable..."
+    if chmod +x "$installer_script"; then
+        echo "    Permissions set."
+    else
+        echo "Error: Failed to set execute permissions on '$installer_script'."
+        exit 1
+    fi
+
+    if sudo "$installer_script"; then
+        echo "[*] Update process (re-installation) completed successfully."
+        echo "[*] Services/timers should have been restarted by the installer if necessary."
+        echo "[*] Use '$0 status' to check the current state."
+    else
+        echo "Error: Installer script failed during update process."
+        echo "Please check the output above for errors."
+        exit 1
+    fi
 }
 
 # Function to trigger uninstall
