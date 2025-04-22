@@ -1,4 +1,4 @@
-const fs = require('fs'); // Require the original fs
+const fs = require('fs').promises;
 const path = require('path');
 const statusUpdater = require('../src/statusUpdater');
 
@@ -17,8 +17,8 @@ jest.mock('fs', () => ({
 }));
 
 // Get references to the mocked promise functions *after* mocking
-const mockReadFile = require('fs').promises.readFile;
-const mockWriteFile = require('fs').promises.writeFile;
+const mockReadFile = fs.readFile;
+const mockWriteFile = fs.writeFile;
 
 // Mock logger
 const mockLogger = {
@@ -30,7 +30,8 @@ const mockLogger = {
 
 const mockDataDir = '/fake/data/dir';
 // Use exported constant for filename
-const expectedStatusPath = path.join(mockDataDir, statusUpdater._getStatusFilename()); 
+const expectedStatusFilename = statusUpdater._getStatusFilename();
+const expectedStatusPath = path.join(mockDataDir, expectedStatusFilename);
 const originalPid = process.pid;
 
 // Use exported reset function
@@ -51,34 +52,47 @@ describe('Status Updater', () => {
     });
 
     describe('initializeStatus', () => {
+        test('should reject invalid path', async () => {
+            await statusUpdater.initializeStatus(null, mockLogger);
+            expect(mockLogger.error).toHaveBeenCalledWith('Invalid status file path provided to initializeStatus.');
+            expect(statusUpdater._getStatusFilePath()).toBeNull();
+
+            await statusUpdater.initializeStatus(undefined, mockLogger);
+            expect(mockLogger.error).toHaveBeenCalledTimes(2);
+
+            await statusUpdater.initializeStatus('', mockLogger);
+            expect(mockLogger.error).toHaveBeenCalledTimes(3);
+        });
+
         test('should load existing status file and reset running state', async () => {
             const existingStatus = {
-                status: 'running:initial',
-                pid: 54321, // Stale PID
-                lastRunSummary: 'Previous run info'
+                ...statusUpdater._getDefaultStatus(),
+                status: 'running:initial', // Stale state
+                pid: 123,
+                lastSyncTimestamp: '2023-10-26T10:00:00Z',
             };
             mockReadFile.mockResolvedValue(JSON.stringify(existingStatus));
-            mockWriteFile.mockResolvedValue();
 
-            await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+            // Call initializeStatus with the FULL path
+            await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
 
             expect(mockReadFile).toHaveBeenCalledWith(expectedStatusPath, 'utf8');
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Found stale \'running\' status'));
-            expect(mockWriteFile).toHaveBeenCalled(); 
+            expect(mockWriteFile).toHaveBeenCalled(); // Should write back the cleaned status
             // Check internal status via exported getter
             const status = statusUpdater._getCurrentStatus();
-            expect(status.status).toBe('idle');
+            expect(status.status).toBe('idle'); // Reset to idle
             expect(status.pid).toBeNull();
-            expect(status.lastRunSummary).toBe('Previous run info'); 
+            expect(status.lastSyncTimestamp).toBe('2023-10-26T10:00:00Z'); // Keep other loaded fields
         });
 
         test('should initialize with defaults and create file if not found', async () => {
-            const error = new Error('ENOENT');
+            const error = new Error('File not found');
             error.code = 'ENOENT';
             mockReadFile.mockRejectedValue(error);
-            mockWriteFile.mockResolvedValue();
 
-            await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+            // Call initializeStatus with the FULL path
+            await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
 
             expect(mockReadFile).toHaveBeenCalledWith(expectedStatusPath, 'utf8');
             expect(mockLogger.info).toHaveBeenCalledWith('Status file not found, initializing with default status.');
@@ -91,7 +105,8 @@ describe('Status Updater', () => {
             const error = new Error('Read failed');
             mockReadFile.mockRejectedValue(error);
 
-            await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+            // Call initializeStatus with the FULL path
+            await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
             
             // Use exact error message check
             expect(mockLogger.error).toHaveBeenCalledWith(`Error loading status file ${expectedStatusPath}, using defaults: ${error.message}`);
@@ -103,7 +118,7 @@ describe('Status Updater', () => {
              const invalidJsonString = 'invalid json';
              mockReadFile.mockResolvedValue(invalidJsonString);
 
-             await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+             await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
              
              // Check exact error message (parsing error message might vary slightly by Node version)
              expect(mockLogger.error).toHaveBeenCalledWith(expect.stringMatching(/^Error loading status file.*using defaults: Unexpected token .*JSON/));
@@ -114,56 +129,73 @@ describe('Status Updater', () => {
 
     // writeStatusToFile is internal, test via functions that call it (updateStatus etc)
     describe('updateStatus', () => {
+        beforeEach(async () => {
+            // Ensure module is initialized for these tests, mock read to avoid errors
+            mockReadFile.mockRejectedValue({ code: 'ENOENT' }); // Simulate file not found initially
+            await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
+            mockWriteFile.mockClear(); // Clear the initial write from initializeStatus
+        });
+
+        test('should log error but not throw if path not initialized', async () => {
+            statusUpdater._resetStatusModule(); // Explicitly de-initialize
+            const updates = { status: 'testing' };
+            await statusUpdater.updateStatus(updates, mockLogger);
+            expect(mockLogger.error).toHaveBeenCalledWith('Status file path not initialized. Call initializeStatus first.');
+            expect(mockWriteFile).not.toHaveBeenCalled();
+            // Should still update in-memory status
+            expect(statusUpdater._getCurrentStatus()).toEqual(expect.objectContaining(updates));
+        });
+
         test('should update internal status and write to file', async () => {
-            await statusUpdater.initializeStatus(mockDataDir, mockLogger); // Init first
-            mockReadFile.mockRejectedValue({ code: 'ENOENT' }); 
-            mockWriteFile.mockResolvedValue();
             const updates = { status: 'running:test', pid: 999 };
-            // Use default status from exported getter
-            const expectedStatus = { ...statusUpdater._getDefaultStatus(), ...updates }; 
+            const expectedStatus = { ...statusUpdater._getDefaultStatus(), ...updates };
 
             await statusUpdater.updateStatus(updates, mockLogger);
             
             expect(statusUpdater._getCurrentStatus()).toEqual(expectedStatus);
             expect(mockWriteFile).toHaveBeenCalledWith(expectedStatusPath, JSON.stringify(expectedStatus, null, 2), 'utf8');
         });
-         test('should log error but not throw if path not initialized', async () => {
-             // initializeStatus NOT called first
-             const updates = { status: 'running:test', pid: 999 };
-             await statusUpdater.updateStatus(updates, mockLogger);
-             expect(mockLogger.error).toHaveBeenCalledWith('Status file path not initialized. Call initializeStatus first.');
-             // Internal status might update, but write should fail silently
-             expect(mockWriteFile).not.toHaveBeenCalled(); 
-         });
     });
     
     describe('setSyncStartStatus', () => {
+        beforeEach(async () => {
+            mockReadFile.mockRejectedValue({ code: 'ENOENT' });
+            await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
+            mockWriteFile.mockClear();
+             // Mock process.pid
+             Object.defineProperty(process, 'pid', { value: 12345, writable: true });
+             // Mock Date
+             const constantDate = new Date('2024-01-10T12:00:00.000Z');
+             global.Date = class extends Date {
+                 constructor() {
+                     super();
+                     return constantDate;
+                 }
+             };
+        });
+         afterEach(() => {
+             // Restore original Date constructor
+             global.Date = Date;
+         });
+
         test('should set correct fields for starting sync', async () => {
-            await statusUpdater.initializeStatus(mockDataDir, mockLogger);
-            mockWriteFile.mockResolvedValue();
-            const lastSync = '2024-01-01T00:00:00Z';
-            const totalItems = 150;
             const runType = 'incremental';
-            
-            // Mock Date constructor for predictable start time
-            const mockStartTime = new Date('2024-01-10T12:00:00Z');
-            jest.spyOn(global, 'Date').mockImplementation(() => mockStartTime);
+            const totalItems = 150;
+            const lastSync = '2024-01-01T00:00:00Z';
 
             await statusUpdater.setSyncStartStatus(runType, totalItems, lastSync, mockLogger);
 
             const expectedStatus = {
-                ...statusUpdater._getDefaultStatus(), // Start from default
+                ...statusUpdater._getDefaultStatus(),
                 status: `running:${runType}`,
-                pid: 12345, 
-                currentRunStartTimeISO: mockStartTime.toISOString(),
+                pid: 12345,
+                currentRunStartTimeISO: '2024-01-10T12:00:00.000Z',
                 currentRunTotalItems: totalItems,
                 currentRunItemsDownloaded: 0,
-                lastSyncTimestamp: lastSync
+                lastSyncTimestamp: lastSync,
             };
             expect(statusUpdater._getCurrentStatus()).toEqual(expectedStatus);
             expect(mockWriteFile).toHaveBeenCalledWith(expectedStatusPath, JSON.stringify(expectedStatus, null, 2), 'utf8');
-
-            global.Date.mockRestore(); // Restore original Date constructor
         });
     });
 
@@ -172,7 +204,7 @@ describe('Status Updater', () => {
         const WRITE_INTERVAL = statusUpdater._getWriteInterval(); // Use exported const
 
         beforeEach(async () => {
-             await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+             await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
              await statusUpdater.setSyncStartStatus('initial', total, null, mockLogger);
              mockWriteFile.mockClear(); 
         });
@@ -206,7 +238,7 @@ describe('Status Updater', () => {
     
     describe('setSyncEndStatus', () => {
         test('should set idle status and summary on success', async () => {
-            await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+            await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
             statusUpdater._getCurrentStatus().status = 'running:test'; // Set initial state
             const summary = 'Run successful.';
             const expectedStatus = { ...statusUpdater._getCurrentStatus(), status: 'idle', pid: null, lastRunSummary: summary };
@@ -218,7 +250,7 @@ describe('Status Updater', () => {
         });
 
         test('should set failed status and summary on failure', async () => {
-             await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+             await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
              statusUpdater._getCurrentStatus().status = 'running:test'; 
              const summary = 'Run failed critically.';
              const expectedStatus = { ...statusUpdater._getCurrentStatus(), status: 'failed', pid: null, lastRunSummary: summary };
@@ -232,7 +264,7 @@ describe('Status Updater', () => {
     
     describe('setIdleStatus', () => {
         test('should set status to idle if not already idle', async () => {
-            await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+            await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
             statusUpdater._getCurrentStatus().status = 'running:test'; 
             const expectedStatus = { ...statusUpdater._getCurrentStatus(), status: 'idle', pid: null };
             
@@ -243,7 +275,7 @@ describe('Status Updater', () => {
         });
         
         test('should not write if status is already idle', async () => {
-            await statusUpdater.initializeStatus(mockDataDir, mockLogger);
+            await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
             statusUpdater._getCurrentStatus().status = 'idle'; 
             mockWriteFile.mockClear(); // Clear any writes from init
             

@@ -20,11 +20,18 @@ let currentStatus = { ...defaultStatus };
 /**
  * Initializes the status updater with the path to the status file.
  * Tries to load existing status.
- * @param {string} dataDirectory - The application's data directory path.
+ * @param {string} fullStatusPath - The full, resolved path to the status file.
  * @param {winston.Logger} logger - Logger instance.
  */
-async function initializeStatus(dataDirectory, logger) {
-    statusFilePath = path.join(dataDirectory, STATUS_FILENAME);
+async function initializeStatus(fullStatusPath, logger) {
+    if (!fullStatusPath || typeof fullStatusPath !== 'string') {
+        logger.error('Invalid status file path provided to initializeStatus.');
+        // Handle error appropriately - maybe throw?
+        currentStatus = { ...defaultStatus }; // Use defaults
+        statusFilePath = null;
+        return;
+    }
+    statusFilePath = fullStatusPath;
     logger.debug(`Status file path set to: ${statusFilePath}`);
     try {
         const fileContent = await fs.readFile(statusFilePath, 'utf8');

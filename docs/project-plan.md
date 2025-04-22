@@ -23,3 +23,14 @@
 - [x] Add unit tests for incremental sync.
 - [x] Develop `installer.sh` script (user-specific installation).
 - [x] Create `gphotos-sync-node.service` template (installer generates final file).
+
+## Refactor for Global Installation & Management
+
+- [x] Determine standard Linux directory structure for installation.
+- [x] Modify `installer.sh` to use standard directories (`/opt`, `/etc`, `/var/lib`, `/var/log`, `/usr/local/bin`).
+- [x] Create a wrapper script (`/usr/local/bin/google-photos-backup`) for status, update, uninstall commands.
+- [x] Update `google-synchroniser.js` to correctly locate files in new standard paths (config, state, log).
+- [x] Update systemd service file (`google-photos-backup.service`) for new paths and execution method (handled dynamically in installer).
+- [x] Update documentation (`README.md`, etc.) with new installation details and management commands.
+- [x] Update `project-guide.md` with new installation details.
+- [ ] Update other documentation (`README.md`) with new installation details and management commands.
