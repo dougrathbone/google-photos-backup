@@ -139,8 +139,8 @@ cp ./package.json "$APP_CODE_DIR/"
 [ -f ./package-lock.json ] && cp ./package-lock.json "$APP_CODE_DIR/" || echo_yellow "    package-lock.json not found in source, skipping."
 # Ensure correct ownership and permissions for code files
 chown -R root:root "$APP_CODE_DIR"
-find "$APP_CODE_DIR" -type d -exec chmod 755 {} \\;
-find "$APP_CODE_DIR" -type f -exec chmod 644 {} \\;
+find "$APP_CODE_DIR" -type d -exec chmod 755 {} \;
+find "$APP_CODE_DIR" -type f -exec chmod 644 {} \;
 # NOTE: We don't copy run.js or status.js anymore, they are replaced by the wrapper.
 echo_green "    Application files copied to $APP_CODE_DIR"
 echo
