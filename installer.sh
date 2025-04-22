@@ -345,14 +345,15 @@ echo
 SERVICE_FILE_PATH="$SYSTEMD_DIR/$SERVICE_FILE_NAME"
 echo_blue "[*] Creating systemd service file..."
 
-# Determine the ExecStart based on continuous mode
-EXEC_START_CMD="\\\"\$NODE_EXEC\\\" \\\"\$APP_CODE_DIR/src/google-synchroniser.js\\\""
+# Define the ExecStart command WITHOUT extra escaping for variable expansion in cat
+NODE_EXEC_PATH=$(command -v node)
+EXEC_START_CMD="$NODE_EXEC_PATH \"$APP_CODE_DIR/src/google-synchroniser.js\""
 
 cat > "$SERVICE_FILE_PATH" << EOL
 [Unit]
 Description=Google Photos Backup Service ($APP_NAME)
-Documentation=file://$APP_CODE_DIR/README.md # Assuming a README exists
-After=network-online.target # Wait for network
+Documentation=file://$APP_CODE_DIR/README.md
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -361,32 +362,32 @@ User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$APP_CODE_DIR
 
-# Set environment variable for the app to know it's running in production/installed mode
+# Set environment variables for the app
 Environment="NODE_ENV=production"
-Environment="GPHOTOS_CONFIG_DIR=$CONFIG_DIR" # Pass config dir explicitly if needed
-Environment="GPHOTOS_DATA_DIR=$DATA_DIR"   # Pass data dir explicitly if needed
-Environment="GPHOTOS_LOG_DIR=$LOG_DIR"     # Pass log dir explicitly if needed
+Environment="GPHOTOS_CONFIG_DIR=$CONFIG_DIR"
+Environment="GPHOTOS_DATA_DIR=$DATA_DIR"
+Environment="GPHOTOS_LOG_DIR=$LOG_DIR"
 
 ExecStart=$EXEC_START_CMD
 
 Restart=on-failure
 RestartSec=30
-TimeoutStartSec=300 # Allow 5 minutes for startup (initial sync might take time)
+TimeoutStartSec=300
 
 # Standard Output/Error directed to journald
 StandardOutput=journal
 StandardError=journal
 
-# Optional Security Hardening (consider adding these)
+# Optional Security Hardening
 # ProtectSystem=full
 # ProtectHome=true
 # PrivateTmp=true
 # PrivateDevices=true
 # NoNewPrivileges=true
-# CapabilityBoundingSet=~CAP_SYS_ADMIN CAP_NET_ADMIN # Drop unnecessary capabilities
+# CapabilityBoundingSet=~CAP_SYS_ADMIN CAP_NET_ADMIN
 
 [Install]
-WantedBy=multi-user.target # Standard target for system services
+WantedBy=multi-user.target
 EOL
 chmod 644 "$SERVICE_FILE_PATH"
 echo_green "    Systemd service file created at $SERVICE_FILE_PATH"
@@ -414,12 +415,10 @@ Description=Timer to run Google Photos Backup ($APP_NAME) periodically ($TIMER_S
 Requires=$SERVICE_FILE_NAME
 
 [Timer]
-# OnCalendar= Specifies the schedule (hourly, daily, weekly)
-# Examples: *-*-* *:00:00 (hourly), *-*-* 03:00:00 (daily at 3am), Mon *-*-* 04:00:00 (weekly Mon 4am)
 OnCalendar=$TIMER_SPEC
-RandomizedDelaySec=15min # Spread load
-Persistent=true # Run missed jobs if possible
-Unit=$SERVICE_FILE_NAME # Service to activate
+RandomizedDelaySec=15min
+Persistent=true
+Unit=$SERVICE_FILE_NAME
 
 [Install]
 WantedBy=timers.target
@@ -431,7 +430,7 @@ EOL
     echo_green "    Timer '$TIMER_FILE_NAME' enabled for $TIMER_SPEC schedule."
     echo_yellow "    The timer will start the service automatically based on the schedule."
     echo_yellow "    You can trigger the first sync manually if needed:"
-    echo_yellow "    sudo $APP_NAME sync"
+    echo_yellow "    $APP_NAME sync" # Removed sudo here as well, command runs as root anyway
 fi
 echo
 
