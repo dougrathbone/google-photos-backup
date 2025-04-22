@@ -302,7 +302,7 @@ case "\$1" in
         ;;
     sync)
         echo "Triggering a one-time sync via systemd service..."
-        sudo systemctl start "\$SERVICE_FILE_NAME"
+        systemctl start "\$SERVICE_FILE_NAME"
         echo "Use '\$0 status' or 'journalctl -u \$SERVICE_FILE_NAME' to monitor."
         ;;
     status)
