@@ -54,13 +54,20 @@ This document outlines the requirements for a new Linux application, `google-pho
     * Log major events (startup, sync start/end, number of items downloaded) and errors to the specified `logFilePath`.
     * Include timestamps in log entries.
 * **Installation (`installer.sh`):**
-    * Checks for dependencies (Node.js, npm).
-    * Creates necessary directories (e.g., for config, logs, state, application code).
-    * Copies application files to a designated location (e.g., `/opt/gphotos-sync-linux` or `~/.local/share/gphotos-sync-linux`).
-    * Copies the `gphotos-sync-linux.service` file to the appropriate systemd directory (e.g., `/etc/systemd/system/` or `~/.config/systemd/user/`).
-    * Enables and optionally starts the systemd service.
-* **Service File (`gphotos-sync-linux.service`):**
-    * Defines how to run the Node.js application as a service.
+    * Checks for dependencies (Node.js, npm, systemctl, etc.).
+    * Must be run with sudo/root privileges.
+    * Creates necessary directories with appropriate permissions/ownership (`/opt/google-photos-backup`, `/etc/google-photos-backup`, `/var/lib/google-photos-backup`, `/var/log/google-photos-backup`).
+    * Creates a service user/group (`gphotosync`).
+    * Copies application files to `/opt/google-photos-backup`.
+    * Installs production Node.js dependencies in `/opt/google-photos-backup`.
+    * Generates a default config file in `/etc/google-photos-backup/config.json`.
+    * Creates a management wrapper script `/usr/local/bin/google-photos-backup` (handles status, sync, logs, update, uninstall).
+    * Dynamically generates the `google-photos-backup.service` file in `/etc/systemd/system/`.
+    * Dynamically generates an optional `google-photos-backup.timer` file in `/etc/systemd/system/` if scheduled mode is selected.
+    * Enables the systemd service or timer.
+    * Creates an uninstaller script `/usr/local/sbin/uninstall-google-photos-backup`.
+* **Service File (`google-photos-backup.service`):**
+    * Defines how to run the Node.js application as a system service.
     * Specifies the user to run as (if applicable).
     * Ensures the service restarts on failure (with reasonable limits).
     * Specifies dependency on network being available.
@@ -110,8 +117,8 @@ To make this PRD even more useful for code generation, please consider these poi
 4.  **Specific Sync Logic:** Should the incremental sync rely purely on querying for items newer than the `lastSyncTimestamp`, or should it also cross-reference against the `downloadedMediaIds` in `state.json` just in case? (Timestamp is usually sufficient and more efficient).
 5.  **Handling Deletions:** For this initial version, we are explicitly *not* handling deletions. Is that correct? (i.e., if a user deletes a photo in Google Photos, the local copy remains).
 6.  **Error Handling Specifics:** Any specific requirements for retries? (e.g., How many times to retry on network error? How long to wait between retries?)
-7.  **Logging Level:** Should the logging level (e.g., INFO, DEBUG, WARN, ERROR) be configurable?
-8.  **Installation Scope:** Should the installer target a system-wide installation (requiring root/sudo, installing to `/etc/systemd/system`, `/opt/`) or a user-specific installation (installing to `~/.config/systemd/user/`, `~/.local/share/`)? User-specific is often easier and safer.
-10. **API Credentials Storage:** While `credentialsPath` is in `config.json`, the *actual* token file should likely have restricted permissions. Should the installer script attempt to set these permissions (e.g., `chmod 600`)?
+7.  **Logging Level:** Should the logging level (e.g., INFO, DEBUG, WARN, ERROR) be configurable? (Yes, added `logLevel` to config, defaults to INFO).
+8.  **Installation Scope:** Should the installer target a system-wide installation (requiring root/sudo, installing to `/etc/systemd/system`, `/opt/`) or a user-specific installation (installing to `~/.config/systemd/user/`, `~/.local/share/`)? User-specific is often easier and safer. (Implemented as system-wide installation requiring root).
+10. **API Credentials Storage:** While `credentialsPath` is in `config.json`, the *actual* token file should likely have restricted permissions. Should the installer script attempt to set these permissions (e.g., `chmod 600`)? (Yes, installer sets config dir and advises setting permissions `640` for `client_secret.json`, owned by `root:gphotosync`).
 
 Once you provide answers or preferences for these questions, we can refine the PRD further, making it a stronger guide for Gemini.

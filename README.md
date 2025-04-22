@@ -117,67 +117,159 @@ npm test
 
 This command will execute all tests located in the `tests/` directory.
 
-## Installation (Linux with systemd)
+## Installation (Linux with systemd - System-Wide)
 
-An installer script is provided to set up the application and run it periodically as a systemd user service.
+An installer script is provided to set up the application as a system-wide service managed by systemd.
 
-1.  **Make Installer Executable:**
+**Requirements:**
+*   Linux system with `systemd`.
+*   `sudo` or root privileges to run the installer.
+*   `node`, `npm`, `git` installed.
+
+**Steps:**
+
+1.  **Clone the Repository:**
+    ```bash
+    git clone <repository-url> # Replace <repository-url> with the actual Git URL
+    cd google-synchroniser
+    ```
+
+2.  **Make Installer Executable:**
     ```bash
     chmod +x installer.sh
     ```
-2.  **Run Installer:**
+
+3.  **Run Installer with Sudo:**
     ```bash
-    ./installer.sh
+    sudo ./installer.sh
     ```
-3.  **Follow Prompts:** The installer will ask you to choose a synchronization schedule (Hourly, Daily, Weekly, or **Continuous**).
-4.  **Place Credentials:** AFTER the installer completes, copy your downloaded `client_secret.json` file into the configuration directory shown by the installer (usually `~/.config/gphotos-sync-node/`).
-5.  **Manual First Run (IMPORTANT):** BEFORE starting the timer OR service, you MUST run the application manually once from your terminal to perform the initial Google Account authorization (OAuth flow). The installer will print the command (e.g., `cd ~/.local/share/gphotos-sync-node && ./run.js`). Follow the on-screen instructions to copy the URL, authorize in your browser, and paste the code back into the terminal.
-6.  **Start Timer or Service:** Once authorized:
-    *   If you chose **Hourly, Daily, or Weekly**, start the **timer**: 
+
+4.  **Follow Prompts:** The installer will:
+    *   Check dependencies.
+    *   Ask you to choose a synchronization schedule (**Hourly**, **Daily**, **Weekly**, or **Continuous**).
+    *   Create a dedicated system user/group (`gphotosync`).
+    *   Create necessary directories:
+        *   App Code: `/opt/google-photos-backup`
+        *   Config: `/etc/google-photos-backup`
+        *   Data/State: `/var/lib/google-photos-backup`
+        *   Logs: `/var/log/google-photos-backup`
+    *   Install Node.js dependencies.
+    *   Generate a default `config.json` in `/etc/google-photos-backup/`.
+    *   Create a management wrapper script: `/usr/local/bin/google-photos-backup`.
+    *   Create systemd service (`/etc/systemd/system/google-photos-backup.service`) and timer (`*.timer`, if scheduled) files.
+    *   Enable the systemd service/timer.
+    *   Create an uninstaller script: `/usr/local/sbin/uninstall-google-photos-backup`.
+
+5.  **Place Credentials:**
+    *   Go to the [Google Cloud Console](https://console.cloud.google.com/) and download your **OAuth client ID** credentials JSON file (select "Desktop app" type).
+    *   Copy the downloaded file into the configuration directory:
         ```bash
-        # Use the exact timer name shown by the installer (e.g., google-photos-backup.timer)
-        systemctl --user start google-photos-backup.timer
+        sudo cp /path/to/your/downloaded_credentials.json /etc/google-photos-backup/client_secret.json
         ```
-    *   If you chose **Continuous**, start the **service** directly:
+    *   **Set correct ownership and permissions:**
         ```bash
-        # Use the exact service name shown by the installer (e.g., google-photos-backup.service)
-        systemctl --user start google-photos-backup.service
+        sudo chown root:gphotosync /etc/google-photos-backup/client_secret.json
+        sudo chmod 640 /etc/google-photos-backup/client_secret.json
         ```
 
-Your photos will now synchronize based on the schedule you selected. You can check the status and logs using the `systemctl --user` and `journalctl --user` commands provided by the installer.
+6.  **Manual First Run (IMPORTANT for Authentication):**
+    *   Before the service/timer can run successfully, you **must** run the application manually **once as the service user** to perform the initial Google Account authorization (OAuth flow).
+    *   Execute the following command in your terminal:
+        ```bash
+        sudo -u gphotosync NODE_ENV=production node /opt/google-photos-backup/src/google-synchroniser.js
+        ```
+    *   Follow the on-screen instructions:
+        *   Copy the authorization URL provided.
+        *   Open the URL in a web browser.
+        *   Log in to your Google Account.
+        *   Grant the requested permissions (should be read-only access).
+        *   Copy the authorization code provided by Google.
+        *   Paste the code back into the terminal when prompted.
+    *   The application will save the necessary tokens in the state file (`/var/lib/google-photos-backup/sync_state.json`).
+
+7.  **Start/Enable Service/Timer:**
+    *   The installer already enables the service or timer to start on boot.
+    *   **Continuous Mode:** If you chose continuous mode, you may need to start the service manually the first time after authorization:
+        ```bash
+        sudo systemctl start google-photos-backup.service
+        ```
+    *   **Scheduled Mode:** The timer will automatically trigger the service according to the schedule (e.g., hourly, daily). To trigger the *first* sync immediately after authorization:
+        ```bash
+        sudo google-photos-backup sync
+        ```
+
+## Managing the Service
+
+Once installed, use the `google-photos-backup` command (available in your PATH) to manage the application:
+
+*   **Check Status:** Shows the current status from the status file and the systemd service/timer status.
+    ```bash
+    google-photos-backup status
+    ```
+*   **Trigger Manual Sync (Scheduled Mode):** Starts the systemd service once.
+    ```bash
+    sudo google-photos-backup sync
+    ```
+*   **View Live Logs:** Follows the logs being written by the service via journald.
+    ```bash
+    google-photos-backup logs
+    ```
+*   **Update (Placeholder):** Provides instructions for manual update.
+    ```bash
+    google-photos-backup update
+    ```
+*   **Uninstall:** Runs the uninstaller script (requires sudo).
+    ```bash
+    sudo google-photos-backup uninstall
+    ```
+
+## Configuration
+
+After installation, the main configuration file is located at:
+`/etc/google-photos-backup/config.json`
+
+You can edit this file (using `sudo`) to change settings like:
+*   `localSyncDirectory`: Where photos are downloaded.
+*   `debugMaxPages`, `debugMaxDownloads`: For debugging/testing.
+
+**Important:** Do not change the `credentialsPath`, `logFilePath`, `stateFilePath`, or `statusFilePath` unless you understand the implications, as the application relies on these standard paths when run by the service.
+
+## Files and Directories
+
+*   `/opt/google-photos-backup`: Application source code.
+*   `/etc/google-photos-backup`: Configuration files (`config.json`, `client_secret.json`).
+*   `/var/lib/google-photos-backup`: Application data (state file `sync_state.json`, status file `status.json`, lock file).
+*   `/var/log/google-photos-backup`: Log files (`gphotos_sync.log`, `error.log`, etc.).
+*   `/usr/local/bin/google-photos-backup`: Management command script.
+*   `/etc/systemd/system/google-photos-backup.service`: Systemd service definition.
+*   `/etc/systemd/system/google-photos-backup.timer`: Systemd timer definition (if using scheduled sync).
+*   `/usr/local/sbin/uninstall-google-photos-backup`: Uninstaller script.
 
 ## Updating the Application
 
-If you have previously installed the application using `installer.sh`, you can update it using the `updater.sh` script:
+Currently, the `google-photos-backup update` command only provides manual instructions. To update:
 
-1.  Navigate to the directory where you cloned the source code repository.
-2.  Pull the latest changes from the repository (e.g., `git pull origin main`).
-3.  Make the updater script executable (if you haven't already):
+1.  Navigate to the directory where you originally cloned the source code repository.
+2.  Pull the latest changes: `git pull origin main` (or your branch).
+3.  Re-run the installer:
     ```bash
-    chmod +x updater.sh
+    sudo ./installer.sh
     ```
-4.  Run the updater script from the **root of the repository clone**:
-    ```bash
-    ./updater.sh
-    ```
-5.  Confirm when prompted.
-6.  **Important:** The script will stop the running service/timer. You must **manually restart** it after the update using the command provided by the script (e.g., `systemctl --user restart google-photos-backup.timer` or `systemctl --user restart google-photos-backup.service`).
+    The installer should handle copying new files and restarting services if necessary (though you may be prompted).
 
 ## Uninstalling the Application
 
-To remove the application, its configuration files, logs, state file, and systemd units, run the `uninstaller.sh` script:
+Use the management command:
+```bash
+sudo google-photos-backup uninstall
+```
+Follow the prompts. It will stop services, remove files/directories, and optionally remove the service user/group.
 
-1.  Make the uninstaller script executable:
-    ```bash
-    chmod +x uninstaller.sh
-    ```
-2.  Run the uninstaller script:
-    ```bash
-    ./uninstaller.sh
-    ```
-3.  Confirm when prompted.
+**Warning:** Carefully read the prompts during uninstallation, especially regarding the removal of configuration, data, and log directories, as this can be destructive.
 
-**Warning:** This will permanently delete the installed application code and configuration. It will **not** delete the downloaded photos folder unless it happens to be inside the default installation data directory (`~/.local/share/google-photos-backup/data`), which is not the default configuration.
+## Concurrency
+
+The application uses a lock file located within `/var/lib/google-photos-backup/` to prevent multiple instances from running simultaneously, whether triggered manually or by the systemd service/timer.
 
 ## Checking Status
 
@@ -196,6 +288,6 @@ This will show:
 
 Note: The status file provides snapshots. Real-time speed and ETA calculation are not currently implemented.
 
-## Concurrency
+## Development Setup
 
-The application uses a lock file (`
+(Instructions for setting up a local development environment remain largely the same, but note that running `npm start` will use development paths for config/logs/state relative to the project root, not the system-wide paths.)
