@@ -149,8 +149,8 @@ echo_blue "    Attempting to create/set permissions for: $CHOSEN_BACKUP_DIR ..."
 if install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$CHOSEN_BACKUP_DIR"; then
     echo_green "    Directory created/permissions set successfully."
     
-    # Verify writability for the service user
-    if ! sudo -u "$SERVICE_USER" test -w "$CHOSEN_BACKUP_DIR"; then
+    # Verify writability for the service user using su instead of sudo
+    if ! su -s /bin/sh -c "test -w '$CHOSEN_BACKUP_DIR'" "$SERVICE_USER"; then
         echo_yellow "    WARNING: Verification failed. Service user '$SERVICE_USER' may not have write permissions."
         echo_yellow "             Please manually check permissions on: $CHOSEN_BACKUP_DIR"
     else
