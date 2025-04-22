@@ -118,17 +118,40 @@ fi
 echo
 
 # --- Create Directories with Correct Permissions ---
-echo_blue "[*] Creating installation directories..."
+echo_blue "[*] Creating core installation directories..."
 install -d -m 755 -o root -g root "$APP_CODE_DIR"
-install -d -m 750 -o root -g "$SERVICE_GROUP" "$CONFIG_DIR" # Config readable by root & service group
-install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$DATA_DIR"  # Data writable by service user/group
-install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$LOG_DIR"   # Logs writable by service user/group
+install -d -m 750 -o root -g "$SERVICE_GROUP" "$CONFIG_DIR"
+install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$DATA_DIR"
+install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$LOG_DIR"
+echo_green "    Core directories created/permissions set."
 # /usr/local/bin should already exist and be suitable
-echo_green "    Directories created/permissions set:"
-echo "      - $APP_CODE_DIR (root:root, 755)"
-echo "      - $CONFIG_DIR (root:$SERVICE_GROUP, 750)"
-echo "      - $DATA_DIR ($SERVICE_USER:$SERVICE_GROUP, 770)"
-echo "      - $LOG_DIR ($SERVICE_USER:$SERVICE_GROUP, 770)"
+echo
+
+# --- Configure Backup Directory --- 
+default_backup_dir="$DATA_DIR/gphotos_backup"
+echo_blue "[*] Configure Local Backup Directory" 
+read -p "    Enter the full path for photo backups [$default_backup_dir]: " CHOSEN_BACKUP_DIR
+# Use default if user entered nothing
+CHOSEN_BACKUP_DIR=${CHOSEN_BACKUP_DIR:-$default_backup_dir}
+
+echo_blue "    Attempting to create/set permissions for: $CHOSEN_BACKUP_DIR ..."
+try
+    # Create the directory and set ownership/permissions for the service user
+    install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$CHOSEN_BACKUP_DIR"
+    echo_green "    Directory created/permissions set for service user."
+    
+    # Verify writability for the service user
+    if ! sudo -u "$SERVICE_USER" test -w "$CHOSEN_BACKUP_DIR"; then
+        echo_yellow "    WARNING: Verification failed. Service user '$SERVICE_USER' may not have write permissions."
+        echo_yellow "             Please manually check permissions on: $CHOSEN_BACKUP_DIR"
+    else
+        echo_green "    Write permissions verified for service user '$SERVICE_USER'."
+    fi
+catch err
+    echo_red "    ERROR: Failed to create or set permissions on $CHOSEN_BACKUP_DIR." 
+    echo_red "           Please check the path and parent directory permissions."
+    exit 1
+end
 echo
 
 # --- Copy Application Files ---
@@ -159,9 +182,12 @@ echo
 CONFIG_PATH="$CONFIG_DIR/$CONFIG_FILE_NAME"
 echo_blue "[*] Creating default configuration file..."
 
+# Escape backslashes and double quotes in the backup directory path for JSON compatibility
+JSON_ESCAPED_BACKUP_DIR=$(sed 's/\\/\\\\/g; s/"/\\"/g' <<< "$CHOSEN_BACKUP_DIR")
+
 cat > "$CONFIG_PATH" << EOL
 {
-  "localSyncDirectory": "$DATA_DIR/gphotos_backup",
+  "localSyncDirectory": "$JSON_ESCAPED_BACKUP_DIR",
   "syncIntervalHours": 6,
   "credentialsPath": "$CONFIG_DIR/$CREDENTIALS_FILE_NAME",
   "logFilePath": "$LOG_DIR/$LOG_FILE_NAME",
@@ -534,8 +560,9 @@ echo "   $APP_NAME logs        : View live service logs"
 echo "   $APP_NAME update      : (Placeholder) Check for updates"
 echo "   $APP_NAME uninstall   : Uninstall the application (requires sudo)"
 echo
-echo_blue " --- Other Information --- "
+echo_blue " --- Configuration Summary --- "
 echo " Config file: $CONFIG_PATH"
+echo " Backup directory: $CHOSEN_BACKUP_DIR"
 echo " Log/Data dir: $LOG_DIR / $DATA_DIR"
 echo " App code dir: $APP_CODE_DIR"
 echo " Systemd service: $SYSTEMD_DIR/$SERVICE_FILE_NAME"
