@@ -135,10 +135,9 @@ read -p "    Enter the full path for photo backups [$default_backup_dir]: " CHOS
 CHOSEN_BACKUP_DIR=${CHOSEN_BACKUP_DIR:-$default_backup_dir}
 
 echo_blue "    Attempting to create/set permissions for: $CHOSEN_BACKUP_DIR ..."
-try
-    # Create the directory and set ownership/permissions for the service user
-    install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$CHOSEN_BACKUP_DIR"
-    echo_green "    Directory created/permissions set for service user."
+# Create the directory and set ownership/permissions for the service user
+if install -d -m 770 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$CHOSEN_BACKUP_DIR"; then
+    echo_green "    Directory created/permissions set successfully."
     
     # Verify writability for the service user
     if ! sudo -u "$SERVICE_USER" test -w "$CHOSEN_BACKUP_DIR"; then
@@ -147,11 +146,12 @@ try
     else
         echo_green "    Write permissions verified for service user '$SERVICE_USER'."
     fi
-catch err
+else
+    # Handle error from install command
     echo_red "    ERROR: Failed to create or set permissions on $CHOSEN_BACKUP_DIR." 
     echo_red "           Please check the path and parent directory permissions."
     exit 1
-end
+fi
 echo
 
 # --- Copy Application Files ---
