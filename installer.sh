@@ -349,7 +349,8 @@ update_app() {
         exit 1
     fi
 
-    if sudo "$installer_script"; then
+    # Run the installer from the source directory (already checked for root)
+    if "$installer_script"; then 
         echo "[*] Update process (re-installation) completed successfully."
         echo "[*] Services/timers should have been restarted by the installer if necessary."
         echo "[*] Use '$0 status' to check the current state."
