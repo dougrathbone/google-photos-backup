@@ -266,26 +266,15 @@ run_app() {
 
 # Function to show status
 show_status() {
-    local status_file="\$DATA_DIR/$STATUS_FILE_NAME"
-    if [ -f "\$status_file" ]; then
-        echo "Current Status (from \$status_file):"
-        # Use jq if available for nice formatting, otherwise just cat
-        if command -v jq &> /dev/null; then
-            jq . "\$status_file"
-        else
-            cat "\$status_file"
-        fi
-        echo # Add a newline
-        echo "Service Status (systemd):"
-        systemctl status "\$SERVICE_FILE_NAME" | cat # Pipe through cat
-        if [ -f "\$SYSTEMD_DIR/\$TIMER_FILE_NAME" ]; then
-            echo "Timer Status (systemd):"
-            systemctl status "\$TIMER_FILE_NAME" | cat # Pipe through cat
-        fi
+    # Execute the Node.js script to handle status display
+    local node_script="\$APP_CODE_DIR/src/statusDisplay.js"
+    if [ -f "\$node_script" ]; then
+        # Run the node script - it will handle output and errors
+        "\$NODE_EXEC" "\$node_script"
     else
-        echo "Status file not found: \$status_file"
-        echo "Service may not have run yet."
-        echo "Check service status with: systemctl status \$SERVICE_FILE_NAME"
+        echo "Error: Status display script not found at '$node_script'."
+        echo "       Installation might be corrupted."
+        exit 1
     fi
 }
 
