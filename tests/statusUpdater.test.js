@@ -54,7 +54,7 @@ describe('Status Updater', () => {
     describe('initializeStatus', () => {
         test('should reject invalid path', async () => {
             await statusUpdater.initializeStatus(null, mockLogger);
-            expect(mockLogger.error).toHaveBeenCalledWith('Invalid status file path provided to initializeStatus.');
+            expect(mockLogger.error).toHaveBeenCalledWith('Invalid status file path provided to StatusUpdater.');
             expect(statusUpdater._getStatusFilePath()).toBeNull();
 
             await statusUpdater.initializeStatus(undefined, mockLogger);
@@ -140,7 +140,7 @@ describe('Status Updater', () => {
             statusUpdater._resetStatusModule(); // Explicitly de-initialize
             const updates = { status: 'testing' };
             await statusUpdater.updateStatus(updates, mockLogger);
-            expect(mockLogger.error).toHaveBeenCalledWith('Status file path not initialized. Call initializeStatus first.');
+            expect(mockLogger.error).toHaveBeenCalledWith('Status updater not initialized. Call initializeStatus first.');
             expect(mockWriteFile).not.toHaveBeenCalled();
             // Should still update in-memory status
             expect(statusUpdater._getCurrentStatus()).toEqual(expect.objectContaining(updates));
@@ -225,10 +225,13 @@ describe('Status Updater', () => {
         });
 
         test('should write status when count reaches total', async () => {
-             // Directly set internal state for this specific test case
-            statusUpdater._getCurrentStatus().currentRunItemsDownloaded = total - 1;
-            statusUpdater.pendingWrites = 1; // Needs direct access or separate export if kept internal
-            // Let's assume pendingWrites isn't directly testable and focus on behavior:
+             // Increment to total-1, then one more should trigger write
+             for (let i = 0; i < total - 1; i++) {
+                 await statusUpdater.incrementDownloadedCount(mockLogger);
+             }
+             mockWriteFile.mockClear(); // Clear any previous writes
+             
+             // This final increment should trigger a write because we reached total
              await statusUpdater.incrementDownloadedCount(mockLogger);
              expect(statusUpdater._getCurrentStatus().currentRunItemsDownloaded).toBe(total);
              expect(mockWriteFile).toHaveBeenCalledTimes(1);
@@ -239,7 +242,10 @@ describe('Status Updater', () => {
     describe('setSyncEndStatus', () => {
         test('should set idle status and summary on success', async () => {
             await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
-            statusUpdater._getCurrentStatus().status = 'running:test'; // Set initial state
+            // Set status to non-idle first
+            await statusUpdater.updateStatus({ status: 'running:test' }, mockLogger);
+            mockWriteFile.mockClear(); // Clear the write from updateStatus
+            
             const summary = 'Run successful.';
             const expectedStatus = { ...statusUpdater._getCurrentStatus(), status: 'idle', pid: null, lastRunSummary: summary };
             
@@ -251,7 +257,10 @@ describe('Status Updater', () => {
 
         test('should set failed status and summary on failure', async () => {
              await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
-             statusUpdater._getCurrentStatus().status = 'running:test'; 
+             // Set status to non-idle first
+             await statusUpdater.updateStatus({ status: 'running:test' }, mockLogger);
+             mockWriteFile.mockClear(); // Clear the write from updateStatus
+             
              const summary = 'Run failed critically.';
              const expectedStatus = { ...statusUpdater._getCurrentStatus(), status: 'failed', pid: null, lastRunSummary: summary };
             
@@ -265,7 +274,10 @@ describe('Status Updater', () => {
     describe('setIdleStatus', () => {
         test('should set status to idle if not already idle', async () => {
             await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
-            statusUpdater._getCurrentStatus().status = 'running:test'; 
+            // Set status to non-idle first
+            await statusUpdater.updateStatus({ status: 'running:test' }, mockLogger);
+            mockWriteFile.mockClear(); // Clear the write from updateStatus
+            
             const expectedStatus = { ...statusUpdater._getCurrentStatus(), status: 'idle', pid: null };
             
             await statusUpdater.setIdleStatus(mockLogger);
@@ -276,7 +288,7 @@ describe('Status Updater', () => {
         
         test('should not write if status is already idle', async () => {
             await statusUpdater.initializeStatus(expectedStatusPath, mockLogger);
-            statusUpdater._getCurrentStatus().status = 'idle'; 
+            // Status is already 'idle' by default, just clear any writes from init
             mockWriteFile.mockClear(); // Clear any writes from init
             
             await statusUpdater.setIdleStatus(mockLogger);

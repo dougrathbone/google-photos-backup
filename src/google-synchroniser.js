@@ -1,165 +1,75 @@
 const path = require('path');
-const winston = require('winston');
 const lockfile = require('proper-lockfile');
-const statusUpdater = require('./statusUpdater');
-const { loadConfig } = require('./configLoader');
 const { authorize } = require('./googleAuth');
 const { findLatestFileDateRecursive } = require('./fileUtils');
 const { getLatestMediaItem } = require('./googlePhotosApi');
 const { loadState, saveState } = require('./stateManager');
 const { runInitialSync, runIncrementalSync } = require('./syncManager');
+const { initializeConfigAndPaths } = require('./environment');
+const { createLogger, logStartupInfo } = require('./logger');
+const { ErrorHandler, ErrorTypes, ErrorSeverity } = require('./errorHandler');
+const { SyncContext } = require('./syncContext');
 
-const APP_NAME = 'google-photos-backup'; // Consistent naming
+// --- Constants ---
+const CONTINUOUS_MODE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
-/**
- * Determines environment, resolves base paths, loads configuration,
- * and overrides/resolves paths within the config object.
- *
- * @param {string} nodeEnv - The value of process.env.NODE_ENV.
- * @param {string} scriptDirname - The value of __dirname from the calling script.
- * @returns {object} An object containing: { config, baseConfigDir, baseDataDir, baseLogDir, configPath, lockFilePath, isProduction }
- * @throws {Error} If configuration loading fails.
- */
-function initializeConfigAndPaths(nodeEnv, scriptDirname) {
-    const isProduction = nodeEnv === 'production';
-    console.log(`Initializing config and paths (Mode: ${isProduction ? 'Production' : 'Development'})`);
-
-    let baseConfigDir, baseDataDir, baseLogDir;
-
-    if (isProduction) {
-        baseConfigDir = '/etc/' + APP_NAME;
-        baseDataDir = '/var/lib/' + APP_NAME;
-        baseLogDir = '/var/log/' + APP_NAME;
-    } else {
-        const projectRoot = path.resolve(scriptDirname, '..');
-        baseConfigDir = projectRoot;
-        baseDataDir = path.join(projectRoot, 'data');
-        baseLogDir = path.join(projectRoot, 'logs');
-    }
-
-    const configPath = isProduction
-        ? path.join(baseConfigDir, 'config.json')
-        : path.resolve(scriptDirname, '../config.json');
-
-    let config;
-    try {
-        config = loadConfig(configPath);
-        console.log(`Raw configuration loaded from: ${configPath}`);
-
-        if (isProduction) {
-            console.log("Overriding configuration paths for PRODUCTION environment.");
-            config.credentialsPath = path.join(baseConfigDir, path.basename(config.credentialsPath || 'client_secret.json'));
-            config.stateFilePath = path.join(baseDataDir, path.basename(config.stateFilePath || 'sync_state.json'));
-            config.logFilePath = path.join(baseLogDir, path.basename(config.logFilePath || 'gphotos_sync.log'));
-            config.statusFilePath = path.join(baseDataDir, path.basename(config.statusFilePath || 'status.json'));
-            if (!config.localSyncDirectory) {
-                 config.localSyncDirectory = path.join(baseDataDir, 'gphotos_backup');
-                 console.log(`localSyncDirectory not set, defaulting to: ${config.localSyncDirectory}`);
-            }
-        } else {
-            console.log("Resolving paths for DEVELOPMENT environment.");
-            config.credentialsPath = path.resolve(baseConfigDir, config.credentialsPath);
-            config.stateFilePath = path.resolve(baseDataDir, path.basename(config.stateFilePath || 'sync_state.json'));
-            config.logFilePath = path.resolve(baseLogDir, path.basename(config.logFilePath || 'gphotos_sync.log'));
-            config.statusFilePath = path.resolve(baseDataDir, path.basename(config.statusFilePath || 'status.json'));
-            config.localSyncDirectory = path.resolve(baseConfigDir, config.localSyncDirectory);
-            console.log("Resolved development paths:", JSON.stringify(config, null, 2));
-        }
-    } catch (error) {
-        console.error(`Failed to load/process configuration from ${configPath}:`, error.message);
-        // Re-throw the error to be handled by the caller
-        throw new Error(`Configuration error from ${configPath}: ${error.message}`);
-    }
-
-    // Define lock file path based on environment
-    const lockFileName = 'google-photos-backup.lock';
-    const lockFilePath = isProduction
-        ? path.join(baseDataDir, lockFileName)
-        : path.join(path.dirname(config.stateFilePath), lockFileName); // Near state file for dev
-
-    return { config, baseConfigDir, baseDataDir, baseLogDir, configPath, lockFilePath, isProduction };
-}
-
-// --- Global Variables (initialized after config loading) ---
-let config;
-let lockFilePath;
-let isProduction;
-let logger;
+// --- Application Context (replaces global variables) ---
+let syncContext = null;
 
 // --- Initial Setup Execution ---
 try {
     const initResult = initializeConfigAndPaths(process.env.NODE_ENV, __dirname);
-    config = initResult.config;
-    lockFilePath = initResult.lockFilePath;
-    isProduction = initResult.isProduction;
+    const config = initResult.config;
+    const lockFilePath = initResult.lockFilePath;
+    const isProduction = initResult.isProduction;
     const configPath = initResult.configPath;
 
-    // --- Logger Setup (Now depends on initialized config) ---
-    try {
-        require('fs').mkdirSync(path.dirname(config.logFilePath), { recursive: true });
-    } catch (mkdirError) {
-        console.error(`Failed to create log directory ${path.dirname(config.logFilePath)}:`, mkdirError);
-    }
+    // --- Logger Setup (Using logger module) ---
+    const logger = createLogger(config, isProduction);
+    logStartupInfo(logger, config, configPath, lockFilePath, isProduction);
 
-    logger = winston.createLogger({
-        level: config.logLevel || 'info',
-        format: winston.format.combine(
-            winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-            winston.format.errors({ stack: true }),
-            winston.format.json()
-        ),
-        transports: [
-            new winston.transports.Console({
-                level: 'info',
-                format: winston.format.combine(
-                    winston.format.colorize(),
-                    winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
-                )
-            }),
-            new winston.transports.File({ filename: config.logFilePath, level: 'info' }),
-            new winston.transports.File({ filename: path.join(path.dirname(config.logFilePath), 'error.log'), level: 'error' })
-        ],
-        exceptionHandlers: [
-            new winston.transports.File({ filename: path.join(path.dirname(config.logFilePath), 'exceptions.log') })
-        ],
-        rejectionHandlers: [
-            new winston.transports.File({ filename: path.join(path.dirname(config.logFilePath), 'rejections.log') })
-        ]
-    });
-
-    logger.info("---------------------------------------------");
-    logger.info(`Starting Google Photos Backup... (Mode: ${isProduction ? 'Production' : 'Development'})`);
-    logger.info(`Using configuration file: ${configPath}`);
-    logger.info(`Log file: ${config.logFilePath}`);
-    logger.info(`State file: ${config.stateFilePath}`);
-    logger.info(`Status file: ${config.statusFilePath}`);
-    logger.info(`Lock file: ${lockFilePath}`);
-    logger.info(`Credentials file: ${config.credentialsPath}`);
-    logger.info(`Local sync target: ${config.localSyncDirectory}`);
-
-    if (config.debugMaxPages && config.debugMaxPages > 0) {
-        logger.warn(`*** Debug mode enabled: Max ${config.debugMaxPages} pages will be fetched. ***`);
-    }
-    if (config.debugMaxDownloads && config.debugMaxDownloads > 0) {
-        logger.warn(`*** Debug mode enabled: Max ${config.debugMaxDownloads} downloads will be attempted. ***`);
-    }
+    // --- Create Sync Context (replaces global variables) ---
+    // Note: ErrorHandler will be set after initialization in main()
+    syncContext = new SyncContext(config, logger, null, config.statusFilePath);
+    syncContext.setLockInfo(lockFilePath, null); // Lock function will be set later
 
 } catch (initializationError) {
     console.error("Failed during critical initialization:", initializationError);
-    process.exit(1);
+    process.exit(1); // Keep this exit as we don't have errorHandler yet
 }
 
-// --- Main Application Logic (Uses globally initialized config, logger, lockFilePath) ---
+// --- Main Application Logic (Uses sync context) ---
 
-async function main() {
+async function main(context) {
     // --- Initialization Check ---
-    // Ensure essential global variables were initialized before proceeding.
-    if (!config || !logger || !lockFilePath) {
-        // Use console.error as logger might not be initialized
-        console.error("CRITICAL: Configuration or logger not initialized. Main function cannot run. This likely indicates an error during initial setup.");
-        // Avoid calling process.exit here directly, let the top-level handler do it if needed.
+    if (!context) {
+        console.error("CRITICAL: SyncContext not provided. Main function cannot run.");
         return; // Stop execution of main
     }
+
+    // Initialize the context (including StatusUpdater if created)
+    try {
+        await context.initialize();
+    } catch (initError) {
+        console.error("CRITICAL: Failed to initialize SyncContext:", initError.message);
+        return; // Stop execution of main
+    }
+
+    // Setup ErrorHandler now that StatusUpdater is ready
+    if (!context.errorHandler && context.statusUpdater) {
+        const { ErrorHandler } = require('./errorHandler');
+        context.errorHandler = new ErrorHandler(context.logger, context.statusUpdater);
+    }
+
+    // Validate context has all required dependencies
+    try {
+        context.validateDependencies();
+    } catch (validationError) {
+        console.error("CRITICAL: SyncContext validation failed:", validationError.message);
+        return; // Stop execution of main
+    }
+
+    const { config, logger, errorHandler } = context;
 
     let releaseLock = async () => { logger.debug('No lock acquired, release is no-op.'); };
     const statusFilePath = config.statusFilePath;
@@ -171,80 +81,81 @@ async function main() {
              require('fs').mkdirSync(effectiveDataDir, { recursive: true });
              logger.info(`Ensured data directory exists: ${effectiveDataDir}`);
         } catch (mkdirError) {
-             logger.error(`CRITICAL: Failed to create data directory ${effectiveDataDir}:`, mkdirError);
-             // Maybe try to release lock if acquired before exiting?
-             process.exit(1);
+             const error = errorHandler.createFileSystemError(`Failed to create data directory ${effectiveDataDir}`, mkdirError);
+             await errorHandler.handleError(error, 'Directory Creation', true);
+             return; // Exit main function
         }
 
-        // Initialize Status File
-        await statusUpdater.initializeStatus(statusFilePath, logger);
+        // Status updater is already initialized in context.initialize()
 
-        // Acquire Lock (Uses global lockFilePath)
-        logger.info(`Attempting to acquire lock: ${lockFilePath}`);
+        // Acquire Lock
+        logger.info(`Attempting to acquire lock: ${context.lockFilePath}`);
         try {
             const lockOptions = {
                 stale: 10 * 60 * 1000,
                 retries: 0,
-                lockfilePath: lockFilePath
+                lockfilePath: context.lockFilePath
              };
             releaseLock = await lockfile.lock(effectiveDataDir, lockOptions);
-            logger.info(`Lock acquired successfully on directory: ${effectiveDataDir} (using ${lockFilePath} as identifier)`);
+            context.setLockInfo(context.lockFilePath, releaseLock);
+            logger.info(`Lock acquired successfully on directory: ${effectiveDataDir} (using ${context.lockFilePath} as identifier)`);
         } catch (error) {
             if (error.code === 'ELOCKED') {
-                logger.warn(`Lock file ${lockFilePath} (on dir ${effectiveDataDir}) already held by another process. Checking status...`);
-                process.exit(0); // Exit gracefully
+                const lockError = errorHandler.createLockError(`Lock file ${context.lockFilePath} already held by another process`);
+                await errorHandler.handleError(lockError, 'Lock Acquisition');
+                return; // Exit gracefully
             } else {
-                logger.error(`Failed to acquire lock on ${effectiveDataDir} (using ${lockFilePath}):`, error);
-                throw error; // Rethrow other lock errors
+                const lockError = errorHandler.createLockError(`Failed to acquire lock on ${effectiveDataDir}`, error);
+                await errorHandler.handleError(lockError, 'Lock Acquisition', true);
+                return; // Exit main function
             }
         }
 
-        // Get Configuration Settings (Uses global config)
+        // Get Configuration Settings
         const isContinuous = !!config.continuousMode;
         const localSyncDir = config.localSyncDirectory;
 
-        // Authentication (Uses global config)
+        // Authentication
         logger.info("Attempting Google Authentication...");
-        let authResult = null;
         try {
-            authResult = await authorize(config.credentialsPath, config.stateFilePath, logger);
+            const authResult = await authorize(config.credentialsPath, config.stateFilePath, logger);
             if (!authResult || !authResult.accessToken || !authResult.client) {
                 throw new Error('Authorization failed or did not return valid credentials/client.');
             }
-            const accessToken = authResult.accessToken;
-            const authClient = authResult.client;
+            context.setAuthResult(authResult);
             logger.info('Google Photos API access token acquired successfully.');
 
             // === Main Sync Logic (Now within Authentication Success block) ===
 
             // --- Initial Run / State Load ---
             logger.info(`Loading state from: ${config.stateFilePath}`);
-            let currentState = await loadState(config.stateFilePath, logger);
-            await statusUpdater.updateStatus({ status: 'loading_state', lastSyncTimestamp: currentState.lastSyncTimestamp }, logger);
-            let lastSyncTime = currentState.lastSyncTimestamp;
+            const currentState = await loadState(config.stateFilePath, logger);
+            context.setCurrentState(currentState);
+            await context.statusUpdater.updateStatus({ status: 'loading_state', lastSyncTimestamp: context.getLastSyncTimestamp() });
+            let lastSyncTime = context.getLastSyncTimestamp();
             logger.info(`Current state loaded. Last sync timestamp: ${lastSyncTime || 'Never'}`);
 
             // --- Startup Status Logging ---
             logger.info('Gathering startup status information...');
-            await statusUpdater.updateStatus({ status: 'checking_local_files' }, logger);
+            await context.statusUpdater.updateStatus({ status: 'checking_local_files' });
             const latestLocalDate = await findLatestFileDateRecursive(localSyncDir, logger);
             if (latestLocalDate) {
                 logger.info(`Latest file date found locally (${localSyncDir}): ${latestLocalDate.toISOString()}`);
-                await statusUpdater.updateStatus({ lastLocalFileDate: latestLocalDate.toISOString() }, logger);
+                await context.statusUpdater.updateStatus({ lastLocalFileDate: latestLocalDate.toISOString() });
             } else {
                 logger.info(`No files found or error scanning local directory (${localSyncDir}).`);
-                 await statusUpdater.updateStatus({ lastLocalFileDate: null }, logger);
+                await context.statusUpdater.updateStatus({ lastLocalFileDate: null });
             }
 
             logger.info('Checking latest item in Google Photos...');
-            await statusUpdater.updateStatus({ status: 'checking_google_photos' }, logger);
-            const latestMediaItem = await getLatestMediaItem(accessToken, logger);
+            await context.statusUpdater.updateStatus({ status: 'checking_google_photos' });
+            const latestMediaItem = await getLatestMediaItem(context.getAccessToken(), logger);
             if (latestMediaItem && latestMediaItem.mediaMetadata && latestMediaItem.mediaMetadata.creationTime) {
                 logger.info(`Latest media item creation time in Google Photos: ${latestMediaItem.mediaMetadata.creationTime}`);
-                 await statusUpdater.updateStatus({ lastGooglePhotoDate: latestMediaItem.mediaMetadata.creationTime }, logger);
+                await context.statusUpdater.updateStatus({ lastGooglePhotoDate: latestMediaItem.mediaMetadata.creationTime });
             } else {
                 logger.warn('Could not determine the latest media item date from Google Photos.');
-                 await statusUpdater.updateStatus({ lastGooglePhotoDate: null }, logger);
+                await context.statusUpdater.updateStatus({ lastGooglePhotoDate: null });
             }
 
             // --- Synchronization Logic ---
@@ -257,14 +168,14 @@ async function main() {
             try {
                 if (initialRun) {
                     logger.info('Performing initial sync...');
-                    await statusUpdater.updateStatus({ status: 'initial_sync_running', currentRunStart: syncTimestamp.toISOString() }, logger);
-                    const initialSyncResult = await runInitialSync(accessToken, config, logger);
+                    await context.statusUpdater.updateStatus({ status: 'initial_sync_running', currentRunStart: syncTimestamp.toISOString() });
+                    const initialSyncResult = await runInitialSync(context.getAccessToken(), config, logger, context.statusUpdater);
                     syncSuccess = initialSyncResult.success;
                     syncItemsDownloaded = initialSyncResult.itemsDownloaded || 0;
                 } else {
                     logger.info(`Performing incremental sync (Last sync: ${lastSyncTime})...`);
-                    await statusUpdater.updateStatus({ status: 'incremental_sync_running', currentRunStart: syncTimestamp.toISOString() }, logger);
-                    const incrementalSyncResult = await runIncrementalSync(lastSyncTime, accessToken, config, logger);
+                    await context.statusUpdater.updateStatus({ status: 'incremental_sync_running', currentRunStart: syncTimestamp.toISOString() });
+                    const incrementalSyncResult = await runIncrementalSync(lastSyncTime, context.getAccessToken(), config, logger, context.statusUpdater);
                     syncSuccess = incrementalSyncResult.success;
                     syncItemsDownloaded = incrementalSyncResult.itemsDownloaded || 0;
                 }
@@ -272,16 +183,16 @@ async function main() {
                 logger.error('Error during synchronization process:', syncErr);
                 syncSuccess = false;
                 syncError = syncErr.message;
-                await statusUpdater.updateStatus({ status: 'sync_failed', error: syncError }, logger);
+                await context.statusUpdater.updateStatus({ status: 'sync_failed', error: syncError });
             }
 
             // --- Save State After Sync ---
             if (syncSuccess) {
                 logger.info(`Sync finished successfully. Items downloaded: ${syncItemsDownloaded}. Updating state...`);
                 const newTimestamp = syncTimestamp.toISOString();
-                currentState = { ...currentState, lastSyncTimestamp: newTimestamp };
-                await saveState(config.stateFilePath, currentState, logger);
-                await statusUpdater.updateStatus({
+                context.updateLastSyncTimestamp(newTimestamp);
+                await saveState(config.stateFilePath, context.currentState, logger);
+                await context.statusUpdater.updateStatus({
                     status: isContinuous ? 'idle_continuous' : 'sync_completed',
                     lastSyncTimestamp: newTimestamp,
                     lastRunOutcome: 'success',
@@ -292,7 +203,7 @@ async function main() {
                 lastSyncTime = newTimestamp;
             } else {
                 logger.warn('Sync run failed or encountered errors, not updating state file timestamp.');
-                 await statusUpdater.updateStatus({
+                 await context.statusUpdater.updateStatus({
                      status: 'sync_failed',
                      lastRunOutcome: 'failure',
                      lastRunItemsDownloaded: syncItemsDownloaded,
@@ -301,47 +212,46 @@ async function main() {
                  }, logger);
 
                 if (initialRun && !isContinuous) {
-                     logger.error('Initial sync failed in non-continuous mode. Exiting.');
-                     throw new Error('Initial sync failed.');
+                     const syncError = errorHandler.createApiError('Initial sync failed in non-continuous mode');
+                     await errorHandler.handleError(syncError, 'Initial Sync', true);
+                     return; // Exit main function
                 } else if (initialRun && isContinuous) {
-                     logger.error('Initial sync failed in continuous mode. Exiting to prevent loop.');
-                     throw new Error('Initial sync failed, cannot continue in continuous mode.');
+                     const syncError = errorHandler.createApiError('Initial sync failed in continuous mode');
+                     await errorHandler.handleError(syncError, 'Initial Sync', true);
+                     return; // Exit main function
                 }
             }
 
              // === End of Main Sync Logic block ===
 
         } catch (error) {
-            logger.error('Failed during Authentication or main sync execution:', error);
-            await statusUpdater.updateStatus({
-                status: 'failed',
-                lastRunOutcome: 'failure',
-                lastRunError: `Authentication/Setup Error: ${error.message}`,
-                lastRunFinish: new Date().toISOString()
-             }, logger);
-            process.exit(1);
+            const authError = errorHandler.createAuthenticationError(`Authentication or main sync execution failed: ${error.message}`, error);
+            await errorHandler.handleError(authError, 'Authentication/Sync', true);
+            return; // Exit main function
         }
 
         // Continuous Mode Loop (Uses global config)
         if (isContinuous) {
             logger.info(`Entering continuous mode. Checking for updates every ${CONTINUOUS_MODE_INTERVAL_MS / 1000 / 60} minutes.`);
-            await statusUpdater.updateStatus({ status: 'idle_continuous' }, logger);
+            await context.statusUpdater.updateStatus({ status: 'idle_continuous' });
             while (true) {
                 try {
                     logger.info(`Continuous mode: Waiting for ${CONTINUOUS_MODE_INTERVAL_MS / 1000} seconds...`);
                     await new Promise(resolve => setTimeout(resolve, CONTINUOUS_MODE_INTERVAL_MS));
 
                     logger.info("Re-checking Authentication before continuous sync...");
-                    authResult = await authorize(config.credentialsPath, config.stateFilePath, logger);
+                    const authResult = await authorize(config.credentialsPath, config.stateFilePath, logger);
                      if (!authResult || !authResult.accessToken || !authResult.client) {
-                         throw new Error('Continuous mode: Re-authorization failed.');
+                         const reAuthError = errorHandler.createAuthenticationError('Continuous mode: Re-authorization failed');
+                         await errorHandler.handleError(reAuthError, 'Continuous Mode Re-auth', true);
+                         return; // Exit main function
                      }
-                     const accessToken = authResult.accessToken;
+                     context.setAuthResult(authResult);
                      logger.info('Continuous mode: Authentication refreshed/verified.');
 
                     logger.info(`Continuous mode: Performing incremental sync (Last sync: ${lastSyncTime})...`);
                     const loopSyncTimestamp = new Date();
-                    await statusUpdater.updateStatus({ status: 'incremental_sync_running', currentRunStart: loopSyncTimestamp.toISOString() }, logger);
+                                            await context.statusUpdater.updateStatus({ status: 'incremental_sync_running', currentRunStart: loopSyncTimestamp.toISOString() });
                     let loopSyncSuccess = false;
                     let loopSyncItemsDownloaded = 0;
                     let loopSyncError = null;
@@ -349,9 +259,10 @@ async function main() {
                     try {
                         const incrementalSyncResult = await runIncrementalSync(
                             lastSyncTime,
-                            accessToken,
+                            context.getAccessToken(),
                             config,
-                            logger
+                            logger,
+                            context.statusUpdater
                         );
                         loopSyncSuccess = incrementalSyncResult.success;
                         loopSyncItemsDownloaded = incrementalSyncResult.itemsDownloaded || 0;
@@ -359,59 +270,55 @@ async function main() {
                          logger.error('Continuous mode: Error during incremental sync:', loopErr);
                          loopSyncSuccess = false;
                          loopSyncError = loopErr.message;
-                         await statusUpdater.updateStatus({ status: 'sync_failed', error: loopSyncError }, logger);
+                         await context.statusUpdater.updateStatus({ status: 'sync_failed', error: loopSyncError });
                     }
 
                     if (loopSyncSuccess) {
                         const newTimestamp = loopSyncTimestamp.toISOString();
-                        currentState = { ...currentState, lastSyncTimestamp: newTimestamp };
-                        await saveState(config.stateFilePath, currentState, logger);
-                        await statusUpdater.updateStatus({
+                        context.updateLastSyncTimestamp(newTimestamp);
+                        await saveState(config.stateFilePath, context.currentState, logger);
+                        await context.statusUpdater.updateStatus({
                             status: 'idle_continuous',
                             lastSyncTimestamp: newTimestamp,
                             lastRunOutcome: 'success',
                             lastRunItemsDownloaded: loopSyncItemsDownloaded,
                             lastRunError: null,
                             lastRunFinish: new Date().toISOString()
-                        }, logger);
+                        });
                         lastSyncTime = newTimestamp;
                         logger.info(`Continuous mode: Incremental sync successful (${loopSyncItemsDownloaded} items). State updated.`);
                     } else {
                          logger.warn('Continuous mode: Incremental sync failed, state not updated.');
-                          await statusUpdater.updateStatus({
+                          await context.statusUpdater.updateStatus({
                              status: 'idle_continuous',
                              lastRunOutcome: 'failure',
                              lastRunItemsDownloaded: loopSyncItemsDownloaded,
                              lastRunError: loopSyncError || 'Unknown sync error',
                              lastRunFinish: new Date().toISOString()
-                         }, logger);
+                         });
                     }
 
                 } catch (loopError) {
                     logger.error('Continuous mode: Unhandled error in sync loop:', loopError);
-                     await statusUpdater.updateStatus({
+                     await context.statusUpdater.updateStatus({
                         status: 'failed_continuous_loop',
                         error: `Loop Error: ${loopError.message}`
-                     }, logger);
+                     });
                     logger.warn('Continuous mode: Will retry after the next interval.');
                 }
             }
         } else {
              logger.info('Application finished normally (non-continuous mode).');
-             await statusUpdater.updateStatus({ status: 'idle_finished' }, logger);
+             await context.statusUpdater.updateStatus({ status: 'idle_finished' });
         }
 
     } catch (error) {
-        logger.error('Unhandled error in main execution scope:', error);
-        try {
-            await statusUpdater.updateStatus({ status: 'failed', lastRunOutcome: 'failure', lastRunError: `Main scope error: ${error.message}` }, logger);
-        } catch (statusErr) {
-            logger.error('Additionally failed to update status during main error handling:', statusErr);
-        }
+        const mainError = errorHandler.createApiError(`Unhandled error in main execution scope: ${error.message}`, error);
+        await errorHandler.handleError(mainError, 'Main Execution', true);
         if (releaseLock) {
             try { await releaseLock(); } catch (e) { logger.warn('Failed to release lock during error exit:', e.message); }
         }
-        process.exit(1);
+        return; // Exit main function
     } finally {
         if (!config.continuousMode && releaseLock) {
              try {
@@ -426,20 +333,28 @@ async function main() {
     }
 }
 
-// --- Graceful Shutdown Handling (Uses global config, logger, lockFilePath) ---
+// --- Graceful Shutdown Handling ---
 let exiting = false;
 async function gracefulShutdown(signal) {
     if (exiting) return;
     exiting = true;
+    
+    if (!syncContext) {
+        console.error(`Received ${signal}. Context not available for graceful shutdown.`);
+        process.exit(0);
+        return;
+    }
+
+    const { config, logger } = syncContext;
     logger.warn(`Received ${signal}. Shutting down gracefully...`);
 
     const statusFilePath = config?.statusFilePath;
-    const lockFilePathRef = lockFilePath;
+    const lockFilePathRef = syncContext.lockFilePath;
     const dataDirForShutdown = path.dirname(statusFilePath || './status.json');
 
     if (statusFilePath) {
         try {
-             await statusUpdater.updateStatus({ status: 'shutting_down', signal: signal }, logger);
+             await syncContext.statusUpdater.updateStatus({ status: 'shutting_down', signal: signal });
              logger.info('Status updated to shutting_down.');
         } catch (err) {
             logger.error(`Error setting shutting_down status: ${err.message}`);
@@ -463,7 +378,7 @@ async function gracefulShutdown(signal) {
 
     if (statusFilePath) {
         try {
-             await statusUpdater.setIdleStatus(logger);
+             await syncContext.statusUpdater.setIdleStatus();
              logger.info('Status set to idle during shutdown.');
         } catch (err) {
             logger.error(`Error setting idle status during shutdown: ${err.message}`);
@@ -476,21 +391,31 @@ async function gracefulShutdown(signal) {
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('uncaughtException', (error, origin) => {
-    logger.fatal('FATAL: Uncaught Exception:', { error: error.message, stack: error.stack, origin: origin });
-    process.exit(1);
+process.on('uncaughtException', async (error, origin) => {
+    if (syncContext?.errorHandler) {
+        const fatalError = syncContext.errorHandler.createApiError(`Uncaught Exception: ${error.message}`, error);
+        await syncContext.errorHandler.handleError(fatalError, `Uncaught Exception (${origin})`, true);
+    } else {
+        console.error('FATAL: Uncaught Exception:', { error: error.message, stack: error.stack, origin: origin });
+        process.exit(1);
+    }
 });
-process.on('unhandledRejection', (reason, promise) => {
-     logger.fatal('FATAL: Unhandled Promise Rejection:', { reason: reason, promise: promise });
-     process.exit(1);
+process.on('unhandledRejection', async (reason, promise) => {
+    if (syncContext?.errorHandler) {
+        const rejectionError = syncContext.errorHandler.createApiError(`Unhandled Promise Rejection: ${reason}`);
+        await syncContext.errorHandler.handleError(rejectionError, 'Unhandled Promise Rejection', true);
+    } else {
+        console.error('FATAL: Unhandled Promise Rejection:', { reason: reason, promise: promise });
+        process.exit(1);
+    }
 });
 
 // --- Run Main ---
-if (logger) {
-    main().catch(e => {
+if (syncContext) {
+    main(syncContext).catch(async e => {
         // Catch any unexpected errors from main itself
-        logger.fatal('Unhandled promise rejection in main function execution:', e);
-        process.exit(1);
+        const fatalError = syncContext.errorHandler.createApiError(`Unhandled promise rejection in main function execution: ${e.message}`, e);
+        await syncContext.errorHandler.handleError(fatalError, 'Main Function Promise', true);
     });
 } else {
     console.error("Skipping main() execution due to initialization failure.");

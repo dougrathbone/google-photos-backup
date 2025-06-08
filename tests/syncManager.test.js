@@ -44,8 +44,8 @@ describe('Sync Manager', () => {
         statusUpdater.updateStatus.mockResolvedValue();
         statusUpdater.incrementDownloadedCount.mockResolvedValue();
         statusUpdater.setSyncEndStatus.mockResolvedValue();
-         // Mock the currentStatus getter if needed (for tests checking totals)
-        statusUpdater.currentStatus = { currentRunTotalItems: 0 }; // Simple mock
+        // Mock the getCurrentStatus method that syncManager calls
+        statusUpdater.getCurrentStatus = jest.fn().mockReturnValue({ currentRunTotalItems: 0 });
     });
 
     describe('runInitialSync', () => {
@@ -54,7 +54,7 @@ describe('Sync Manager', () => {
             delete config.debugMaxPages; // Simulate key missing
             config.debugMaxPages = 0; // Ensure default is applied by configLoader mock/logic if tested fully, here we assume 0
 
-            await runInitialSync(mockAuth, config, mockLogger);
+            await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
             expect(googlePhotosApi.getAllAlbums).toHaveBeenCalledWith(mockAuth, mockLogger, 0);
             expect(googlePhotosApi.getAllMediaItems).toHaveBeenCalledWith(mockAuth, mockLogger, 0);
             expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('DEBUG MODE ACTIVE'));
@@ -66,7 +66,7 @@ describe('Sync Manager', () => {
             googlePhotosApi.getAllAlbums.mockResolvedValue([]); 
             googlePhotosApi.getAllMediaItems.mockResolvedValue([]);
 
-            await runInitialSync(mockAuth, config, mockLogger);
+            await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
 
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`DEBUG MODE ACTIVE: Fetching max ${maxPages} pages`));
             expect(googlePhotosApi.getAllAlbums).toHaveBeenCalledWith(mockAuth, mockLogger, maxPages);
@@ -101,7 +101,7 @@ describe('Sync Manager', () => {
             downloader.downloadMediaItem.mockResolvedValue(true);
 
             // --- Run Test ---
-            const result = await runInitialSync(mockAuth, config, mockLogger);
+            const result = await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
 
             // --- Assertions ---
             // Directories
@@ -128,11 +128,11 @@ describe('Sync Manager', () => {
              expect(mockLogger.info).toHaveBeenCalledWith('Summary: Albums Processed: 2, Total Items Encountered: 4, Succeeded/Skipped: 4, Failed: 0');
 
             // Check status calls
-            expect(statusUpdater.setSyncStartStatus).toHaveBeenCalledWith('initial', 0, null, mockLogger);
+            expect(statusUpdater.setSyncStartStatus).toHaveBeenCalledWith('initial', 0, null);
             // Check updates for totals (might be multiple calls)
-            expect(statusUpdater.updateStatus).toHaveBeenCalledWith({ currentRunTotalItems: expect.any(Number) }, mockLogger);
+            expect(statusUpdater.updateStatus).toHaveBeenCalledWith({ currentRunTotalItems: expect.any(Number) });
             expect(statusUpdater.incrementDownloadedCount).toHaveBeenCalledTimes(4);
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'), mockLogger);
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'));
         });
 
         test('should skip main stream download if item was downloaded via album', async () => {
@@ -147,13 +147,13 @@ describe('Sync Manager', () => {
             googlePhotosApi.getAllMediaItems.mockResolvedValue([itemA, itemB]);
             downloader.downloadMediaItem.mockResolvedValue(true);
 
-            await runInitialSync(mockAuth, config, mockLogger);
+            await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
 
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(2); // A (album), B (main)
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(itemA, album1Dir, mockLogger);
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(itemB, mockDir, mockLogger);
             // Verify itemA was NOT called with mockDir (root)
-            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(itemA, mockDir, mockLogger);
+            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(itemA, mockDir);
 
             // Check status calls
             expect(statusUpdater.incrementDownloadedCount).toHaveBeenCalledTimes(2); // A (album), B (main)
@@ -174,7 +174,7 @@ describe('Sync Manager', () => {
             });
             googlePhotosApi.getAllMediaItems.mockResolvedValue([]);
 
-            await runInitialSync(mockAuth, config, mockLogger);
+            await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
 
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Album found with no title'));
             expect(googlePhotosApi.getAlbumMediaItems).not.toHaveBeenCalledWith(untitledAlbum.id, expect.anything(), expect.anything());
@@ -204,7 +204,7 @@ describe('Sync Manager', () => {
             });
             googlePhotosApi.getAllMediaItems.mockResolvedValue([itemD]);
 
-            const result = await runInitialSync(mockAuth, config, mockLogger);
+            const result = await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
             
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledWith(path.join(mockDir, 'Good Album'), mockLogger);
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledWith(path.join(mockDir, 'Bad Album'), mockLogger);
@@ -219,7 +219,7 @@ describe('Sync Manager', () => {
 
             // Check status calls
             expect(statusUpdater.incrementDownloadedCount).toHaveBeenCalledTimes(2); // itemA and itemD
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'), mockLogger);
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'));
         });
 
         test('should return failure if getAllMediaItems fails', async () => {
@@ -230,7 +230,7 @@ describe('Sync Manager', () => {
             const error = new Error('API Error');
             googlePhotosApi.getAllMediaItems.mockRejectedValue(error); // Main stream fetch fails
 
-            const result = await runInitialSync(mockAuth, config, mockLogger);
+            const result = await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
 
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledTimes(2); // Root + Album
             expect(downloader.downloadMediaItem).not.toHaveBeenCalled(); // No items downloaded
@@ -240,14 +240,14 @@ describe('Sync Manager', () => {
 
             // Check status calls
             expect(statusUpdater.setSyncStartStatus).toHaveBeenCalled(); // Called before main items fetched
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(false, expect.stringContaining('Initial sync failed critically'), mockLogger);
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(false, expect.stringContaining('Initial sync failed critically'));
         });
 
         test('should handle zero media items found', async () => {
              const config = { ...baseMockConfig };
              googlePhotosApi.getAllAlbums.mockResolvedValue([]);
              googlePhotosApi.getAllMediaItems.mockResolvedValue([]);
-             const result = await runInitialSync(mockAuth, config, mockLogger);
+             const result = await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
              
              expect(downloader.ensureDirectoryExists).toHaveBeenCalled();
              expect(googlePhotosApi.getAllAlbums).toHaveBeenCalled();
@@ -260,7 +260,7 @@ describe('Sync Manager', () => {
              // Check status calls
              expect(statusUpdater.setSyncStartStatus).toHaveBeenCalled();
              expect(statusUpdater.incrementDownloadedCount).not.toHaveBeenCalled();
-             expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'), mockLogger);
+             expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'));
         });
 
         test('should pass maxPages to getAlbumMediaItems when processing albums', async () => {
@@ -273,7 +273,7 @@ describe('Sync Manager', () => {
             googlePhotosApi.getAlbumMediaItems.mockResolvedValue([itemA]); // Assume it fetches within limit
             googlePhotosApi.getAllMediaItems.mockResolvedValue([]); // No main stream items
 
-            await runInitialSync(mockAuth, config, mockLogger);
+            await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
 
             expect(googlePhotosApi.getAlbumMediaItems).toHaveBeenCalledWith(album1.id, mockAuth, mockLogger, maxPages); // Check maxPages was passed
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(1); // Ensure download still happens
@@ -302,14 +302,14 @@ describe('Sync Manager', () => {
             downloader.downloadMediaItem.mockResolvedValue(true); // Assume downloads succeed
 
             // --- Run Test ---
-            const result = await runInitialSync(mockAuth, config, mockLogger);
+            const result = await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
             
             // --- Assertions ---
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(2); // Only A and B from Album 1
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(itemA, path.join(mockDir, 'Album 1'), mockLogger);
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(itemB, path.join(mockDir, 'Album 1'), mockLogger);
-            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(itemC, path.join(mockDir, 'Album 2'), mockLogger);
-            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(itemD, mockDir, mockLogger); // Main stream not reached
+            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(itemC, path.join(mockDir, 'Album 2'));
+            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(itemD, mockDir); // Main stream not reached
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`Reached debug download limit (${config.debugMaxDownloads}). Stopping further downloads.`));
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`Skipping main stream processing due to download limit reached during album processing.`));
             
@@ -320,7 +320,7 @@ describe('Sync Manager', () => {
 
             // Check status calls
             expect(statusUpdater.incrementDownloadedCount).toHaveBeenCalledTimes(2);
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('(Download limit reached)'), mockLogger);
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('(Download limit reached)'));
         });
 
         test('should stop downloading main stream if maxDownloads reached', async () => {
@@ -335,17 +335,17 @@ describe('Sync Manager', () => {
              googlePhotosApi.getAllMediaItems.mockResolvedValue([itemB]); // Main stream has itemB
              downloader.downloadMediaItem.mockResolvedValue(true);
 
-            await runInitialSync(mockAuth, config, mockLogger);
+            await runInitialSync(mockAuth, config, mockLogger, statusUpdater);
 
             // Assertions
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(1); // Only itemA downloaded
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(itemA, path.join(mockDir, 'Album'), mockLogger);
-            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(itemB, mockDir, mockLogger);
+            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(itemB, mockDir);
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`Reached debug download limit (${config.debugMaxDownloads}). Stopping further downloads.`));
 
             // Correct expected download count
             expect(statusUpdater.incrementDownloadedCount).toHaveBeenCalledTimes(1); // Only A downloaded
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('(Download limit reached)'), mockLogger);
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('(Download limit reached)'));
         });
     });
 
@@ -360,7 +360,7 @@ describe('Sync Manager', () => {
             googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([newItem1, newItem2]);
             downloader.downloadMediaItem.mockResolvedValue(true); // Downloads succeed
 
-            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger);
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger, statusUpdater);
 
             expect(downloader.ensureDirectoryExists).toHaveBeenCalledWith(config.localSyncDirectory, mockLogger);
             expect(googlePhotosApi.searchMediaItemsByDate).toHaveBeenCalledWith(
@@ -379,17 +379,17 @@ describe('Sync Manager', () => {
             expect(result).toEqual({ success: true, itemsProcessed: 2, itemsDownloaded: 2, itemsFailed: 0 });
 
             // Check status calls
-            expect(statusUpdater.setSyncStartStatus).toHaveBeenCalledWith('incremental', 0, lastSyncTime, mockLogger);
-            expect(statusUpdater.updateStatus).toHaveBeenCalledWith({ currentRunTotalItems: 2 }, mockLogger);
+            expect(statusUpdater.setSyncStartStatus).toHaveBeenCalledWith('incremental', 0, lastSyncTime);
+            expect(statusUpdater.updateStatus).toHaveBeenCalledWith({ currentRunTotalItems: 2 });
             expect(statusUpdater.incrementDownloadedCount).toHaveBeenCalledTimes(2);
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'), mockLogger);
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'));
         });
 
         test('should handle zero new items found', async () => {
             const config = { ...baseMockConfig };
             googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([]); // No new items
 
-            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger);
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger, statusUpdater);
 
             expect(googlePhotosApi.searchMediaItemsByDate).toHaveBeenCalled();
             expect(downloader.downloadMediaItem).not.toHaveBeenCalled();
@@ -398,8 +398,8 @@ describe('Sync Manager', () => {
             expect(result).toEqual({ success: true, itemsProcessed: 0, itemsDownloaded: 0, itemsFailed: 0 });
 
             // Check status calls
-            expect(statusUpdater.updateStatus).toHaveBeenCalledWith({ currentRunTotalItems: 0 }, mockLogger);
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'), mockLogger);
+            expect(statusUpdater.updateStatus).toHaveBeenCalledWith({ currentRunTotalItems: 0 });
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'));
         });
 
         test('should handle download failures for new items', async () => {
@@ -411,7 +411,7 @@ describe('Sync Manager', () => {
                 .mockResolvedValueOnce(true)
                 .mockResolvedValueOnce(false);
 
-            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger);
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger, statusUpdater);
 
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(2);
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to process new item new2'));
@@ -420,7 +420,7 @@ describe('Sync Manager', () => {
 
             // Check status calls
             expect(statusUpdater.incrementDownloadedCount).toHaveBeenCalledTimes(1); // Only the successful one
-             expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'), mockLogger); // Still success
+             expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:')); // Still success
         });
 
          test('should handle critical download errors for new items', async () => {
@@ -430,7 +430,7 @@ describe('Sync Manager', () => {
             googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([newItem1]);
             downloader.downloadMediaItem.mockRejectedValue(downloadError);
                 
-            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger);
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger, statusUpdater);
 
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(1);
             expect(mockLogger.error).toHaveBeenCalledWith(`Critical error downloading new item ${newItem1.id} (${newItem1.filename}): ${downloadError.message}`);
@@ -439,7 +439,7 @@ describe('Sync Manager', () => {
 
             // Check status calls
             expect(statusUpdater.incrementDownloadedCount).not.toHaveBeenCalled();
-             expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:'), mockLogger); // Still success
+             expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('Summary:')); // Still success
         });
 
         test('should return failure if searchMediaItemsByDate fails', async () => {
@@ -447,7 +447,7 @@ describe('Sync Manager', () => {
             const error = new Error('API Search Error');
             googlePhotosApi.searchMediaItemsByDate.mockRejectedValue(error);
 
-            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger);
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger, statusUpdater);
 
             expect(downloader.ensureDirectoryExists).toHaveBeenCalled();
             expect(downloader.downloadMediaItem).not.toHaveBeenCalled();
@@ -456,7 +456,7 @@ describe('Sync Manager', () => {
 
             // Check status calls
             expect(statusUpdater.setSyncStartStatus).toHaveBeenCalled();
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(false, expect.stringContaining('Incremental sync failed critically'), mockLogger);
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(false, expect.stringContaining('Incremental sync failed critically'));
         });
 
         test('should stop downloading if maxDownloads reached', async () => {
@@ -469,13 +469,13 @@ describe('Sync Manager', () => {
             googlePhotosApi.searchMediaItemsByDate.mockResolvedValue([newItem1, newItem2, newItem3]);
             downloader.downloadMediaItem.mockResolvedValue(true);
 
-            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger);
+            const result = await runIncrementalSync(lastSyncTime, mockAuth, config, mockLogger, statusUpdater);
 
             // Assertions
             expect(downloader.downloadMediaItem).toHaveBeenCalledTimes(2); // Only first 2 downloaded
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(newItem1, config.localSyncDirectory, mockLogger);
             expect(downloader.downloadMediaItem).toHaveBeenCalledWith(newItem2, config.localSyncDirectory, mockLogger);
-            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(newItem3, config.localSyncDirectory, mockLogger);
+            expect(downloader.downloadMediaItem).not.toHaveBeenCalledWith(newItem3, config.localSyncDirectory);
             expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining(`Reached debug download limit (${config.debugMaxDownloads}). Stopping further downloads.`));
             // Remove the check for the final summary log, as it might not be reached when halting early
             // expect(mockLogger.info).toHaveBeenCalledWith(`Summary: New Items Found: 3, Succeeded/Skipped: 2, Failed: 0`); // Found 3, processed 2
@@ -483,7 +483,7 @@ describe('Sync Manager', () => {
 
             // Check status calls
             expect(statusUpdater.incrementDownloadedCount).toHaveBeenCalledTimes(2);
-            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('(Download limit reached)'), mockLogger);
+            expect(statusUpdater.setSyncEndStatus).toHaveBeenCalledWith(true, expect.stringContaining('(Download limit reached)'));
         });
     });
 }); 
