@@ -43,3 +43,4 @@ credentials.js # Explicitly ignore the user-specified token file
 
 # Backup directory (if created within project)
 gphotos_backup/ sync_state.json
+client_credentials.json
