@@ -1,9 +1,16 @@
 {
-  "status": "idle",
+  "status": "error",
   "pid": null,
   "currentRunStartTimeISO": null,
   "currentRunTotalItems": 0,
   "currentRunItemsDownloaded": 0,
   "lastSyncTimestamp": null,
-  "lastRunSummary": "Never run."
+  "lastRunSummary": "Initial sync failed critically: Failed to fetch all albums: Forbidden",
+  "lastLocalFileDate": "2025-04-22T12:50:35.364Z",
+  "lastGooglePhotoDate": null,
+  "currentRunStart": "2025-06-08T02:46:07.314Z",
+  "lastRunOutcome": "failure",
+  "lastRunItemsDownloaded": 0,
+  "lastRunError": "Initial sync failed in non-continuous mode",
+  "lastRunFinish": "2025-06-08T02:46:08.515Z"
 }
