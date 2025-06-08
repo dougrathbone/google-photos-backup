@@ -6,13 +6,26 @@ A Node.js application to back up your Google Photos library to a local directory
 
 **Architecture:** Modular, fully tested codebase with comprehensive error handling and dependency injection.
 
-## Important Note on API Limitations
+## ⚠️ Important: Google Photos API Restrictions (Confirmed)
 
-Please be aware that due to Google Photos API policy changes implemented after March 31, 2025, the methods used by this tool to access the full photo library (`photoslibrary.readonly` scope and unrestricted `mediaItems.list`/`.search`) are **no longer officially supported by Google** for reading non-app-created data.
+**Status: CONFIRMED as of December 2024**
 
-While the tool might partially function under certain circumstances, relying on it for a complete backup of your existing Google Photos library is **unsupported and may become unreliable or cease functioning** as Google enforces these policy changes.
+Due to Google Photos API policy changes implemented after March 31, 2025, access to existing photos in Google Photos libraries is **BLOCKED** for third-party applications, even with:
+- ✅ Correct OAuth scopes (`photoslibrary.readonly` or `photoslibrary`)
+- ✅ Properly enabled Photos Library API
+- ✅ Valid authentication tokens
 
-This project is primarily maintained for **educational and development purposes** (demonstrating Node.js, API auth, file handling, etc.). It should not be used for critical backups of an entire existing Google Photos library due to these API constraints.
+**Testing Results:**
+- API calls return `403 Forbidden` with "Request had insufficient authentication scopes"
+- This occurs even with proper project configuration and full access scopes
+- Affects all methods: `mediaItems.list`, `albums.list`, `mediaItems.search`
+
+**Impact:**
+- The tool **cannot access existing photos** in your Google Photos library
+- Authentication and application architecture work correctly
+- Only Google-approved applications or enterprise solutions may have access
+
+This project serves as a **technical demonstration** and **educational resource** for Node.js, OAuth, and API integration patterns.
 
 ## Purpose (Original Goal - Now Limited by API Policy)
 
