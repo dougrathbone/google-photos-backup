@@ -8,7 +8,12 @@ const readline = require('readline');
 
 // If modifying these scopes, delete token.json.
 // Readonly scope is sufficient for backup/sync download
-const SCOPES = ['https://www.googleapis.com/auth/photoslibrary.readonly'];
+// User profile scopes are needed for basic OAuth functionality
+const SCOPES = [
+    'https://www.googleapis.com/auth/photoslibrary.readonly',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile'
+];
 
 // The file token.json stores the user's access and refresh tokens, and is
 // created automatically when the authorization flow completes for the first
