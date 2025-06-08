@@ -28,15 +28,10 @@ try {
     const logger = createLogger(config, isProduction);
     logStartupInfo(logger, config, configPath, lockFilePath, isProduction);
 
-    // --- Create StatusUpdater first ---
-    const { createStatusUpdater } = require('./statusUpdater');
-    const statusUpdater = createStatusUpdater(config.statusFilePath, logger);
-    
-    // --- Create ErrorHandler with StatusUpdater ---
-    const errorHandler = new ErrorHandler(logger, statusUpdater);
-    
     // --- Create Sync Context (replaces global variables) ---
-    syncContext = new SyncContext(config, logger, errorHandler, statusUpdater);
+    // Pass status file path so SyncContext can create and initialize StatusUpdater
+    // ErrorHandler will be set after StatusUpdater is initialized in main()
+    syncContext = new SyncContext(config, logger, null, config.statusFilePath);
     syncContext.setLockInfo(lockFilePath, null); // Lock function will be set later
 
 } catch (initializationError) {
@@ -61,7 +56,11 @@ async function main(context) {
         return; // Stop execution of main
     }
 
-    // ErrorHandler is now set during initialization
+    // Setup ErrorHandler now that StatusUpdater is initialized
+    if (!context.errorHandler && context.statusUpdater) {
+        const { ErrorHandler } = require('./errorHandler');
+        context.errorHandler = new ErrorHandler(context.logger, context.statusUpdater);
+    }
 
     // Validate context has all required dependencies
     try {
