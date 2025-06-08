@@ -37,8 +37,8 @@ class SyncContext {
         this.currentState = null;
         this.syncStartTime = null;
         
-        // Validate required dependencies
-        this.validateDependencies();
+        // Validate required dependencies (allow missing errorHandler during construction)
+        this.validateDependencies(true);
     }
 
     /**
@@ -53,20 +53,39 @@ class SyncContext {
 
     /**
      * Validates that all required dependencies are provided
+     * @param {boolean} allowMissingErrorHandler - Whether to allow missing errorHandler (for delayed initialization)
      * @throws {Error} If any required dependency is missing
      */
-    validateDependencies() {
-        const required = ['config', 'logger', 'errorHandler'];
+    validateDependencies(allowMissingErrorHandler = false) {
+        const required = ['config', 'logger'];
+        if (!allowMissingErrorHandler) {
+            required.push('errorHandler');
+        }
         const missing = required.filter(dep => !this[dep]);
         
         if (missing.length > 0) {
             throw new Error(`SyncContext missing required dependencies: ${missing.join(', ')}`);
         }
         
+        // Warn about missing errorHandler if allowed but missing
+        if (allowMissingErrorHandler && !this.errorHandler) {
+            this.logger.warn('SyncContext created without errorHandler - will be set during initialization');
+        }
+        
         // StatusUpdater is optional but should be created if needed
         if (!this.statusUpdater) {
             this.logger.warn('SyncContext created without statusUpdater - status tracking will be disabled');
         }
+    }
+
+    /**
+     * Sets the error handler (for delayed initialization)
+     * @param {ErrorHandler} errorHandler - The error handler instance
+     */
+    setErrorHandler(errorHandler) {
+        this.errorHandler = errorHandler;
+        // Re-validate now that errorHandler is set
+        this.validateDependencies(false);
     }
 
     /**

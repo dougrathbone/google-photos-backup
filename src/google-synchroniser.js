@@ -59,7 +59,8 @@ async function main(context) {
     // Setup ErrorHandler now that StatusUpdater is initialized
     if (!context.errorHandler && context.statusUpdater) {
         const { ErrorHandler } = require('./errorHandler');
-        context.errorHandler = new ErrorHandler(context.logger, context.statusUpdater);
+        const errorHandler = new ErrorHandler(context.logger, context.statusUpdater);
+        context.setErrorHandler(errorHandler);
     }
 
     // Validate context has all required dependencies
